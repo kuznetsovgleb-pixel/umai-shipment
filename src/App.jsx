@@ -1,4 +1,3 @@
-jsx
 import React from "react";
 import ShipmentApp from "./components/ShipmentApp";
 
