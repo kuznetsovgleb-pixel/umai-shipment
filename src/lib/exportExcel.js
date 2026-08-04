@@ -32,13 +32,13 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
   });
 
   const vehiclesHeader = [
-    "ExtID", "Госномер", "Наименование перевозчика", "Готовность", "Паллетовместимость, шт",
+    "ExtID", "Госномер", "Наименование перевозчика", "Готовность", "Тип кузова", "Паллетовместимость, шт",
     "Фактическая грузоподъемность, т", "Собственный", "Vip", "Скиллы",
     "Время погрузки ТС, с", "Время погрузки ТС, по", "Наименование точки старта",
     "Водитель (Фамилия)", "Водитель (Имя)",
   ];
   const vehiclesRows = vehicles.map((v) => [
-    v.extId || "", v.plate, v.carrier, v.ready ? 1 : 0, v.pallets || "",
+    v.extId || "", v.plate, v.carrier, v.ready ? 1 : 0, v.bodyType || "", v.pallets || "",
     v.tons || "", v.custom ? 0 : 1, v.custom ? 0 : 1, v.skills || "",
     v.from || "", v.to || "", v.start || "", v.driverLastName || "", v.driverFirstName || "",
   ]);
