@@ -46,6 +46,9 @@ const rowIssues = (r) => {
 
 const TABS = ["prigorodnoe", "argo", "pto", "otl"];
 
+// список времени погрузки для выбора у ТС
+const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
+
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
   const [day, setDay] = useState(emptyDay());
@@ -154,7 +157,7 @@ export default function ShipmentApp() {
   const addVehicle = () =>
     patchVehicles((vs) => [
       ...vs,
-      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "", driverLastName: "", driverFirstName: "", pallets: "", tons: "", skills: "", from: "", to: "", start: "", custom: true, ready: false },
+      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "", driverLastName: "", driverFirstName: "", pallets: "", tons: "", skills: "", from: "08:00", to: "", start: "", bodyType: "", custom: true, ready: false },
     ]);
   const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
@@ -504,7 +507,9 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                 <th className="text-left font-semibold px-4 py-3">Госномер</th>
                 <th className="text-left font-semibold px-4 py-3">Перевозчик</th>
                 <th className="text-left font-semibold px-4 py-3">Водитель</th>
+                <th className="text-left font-semibold px-4 py-3 w-28">Тип кузова</th>
                 <th className="text-right font-semibold px-4 py-3">Вместимость, палл.</th>
+                <th className="text-left font-semibold px-4 py-3 w-28">Погрузка с</th>
                 <th className="text-left font-semibold px-4 py-3 w-36">Готов на завтра</th>
                 <th className="px-4 py-3 w-10" />
               </tr>
@@ -513,18 +518,10 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
               {(day.vehicles || []).map((v) => (
                 <tr key={v.id} className="border-t border-stone-100">
                   <td className="px-4 py-2">
-                    {v.custom ? (
-                      <input type="text" value={v.plate} onChange={(e) => onUpdateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
-                    ) : (
-                      <span className="font-mono text-stone-700">{v.plate}</span>
-                    )}
+                    <input type="text" value={v.plate} onChange={(e) => onUpdateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
                   </td>
                   <td className="px-4 py-2">
-                    {v.custom ? (
-                      <input type="text" value={v.carrier} onChange={(e) => onUpdateVehicle(v.id, "carrier", e.target.value)} placeholder="Перевозчик" className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
-                    ) : (
-                      <span className="text-stone-600">{v.carrier}</span>
-                    )}
+                    <input type="text" value={v.carrier} onChange={(e) => onUpdateVehicle(v.id, "carrier", e.target.value)} placeholder="Перевозчик" className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
                   </td>
                   <td className="px-4 py-2">
                     <input
@@ -536,6 +533,15 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                         onUpdateVehicle(v.id, "driverFirstName", parts.slice(1).join(" "));
                       }}
                       placeholder="ФИО водителя"
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400"
+                    />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text"
+                      value={v.bodyType || ""}
+                      onChange={(e) => onUpdateVehicle(v.id, "bodyType", e.target.value)}
+                      placeholder="напр. РЕФ"
                       className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400"
                     />
                   </td>
@@ -563,6 +569,17 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                         </>
                       )}
                     </div>
+                  </td>
+                  <td className="px-4 py-2">
+                    <select
+                      value={v.from || "08:00"}
+                      onChange={(e) => onUpdateVehicle(v.id, "from", e.target.value)}
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white"
+                    >
+                      {LOAD_TIME_OPTIONS.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
                   </td>
                   <td className="px-4 py-2">
                     <button
