@@ -18,6 +18,7 @@ export const seedVehiclesForDay = () =>
     from: v.from,
     to: v.to,
     start: v.start || "",
+    bodyType: v.bodyType || "",
     custom: false,
     ready: false, // готовность подтверждается заново каждый день
   }));
