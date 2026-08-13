@@ -418,6 +418,7 @@ export const WAREHOUSES = [
   { id: "prigorodnoe", name: "Пригородное", accent: "emerald", shipPoint: "РЦ Пригородное" },
   { id: "argo", name: "Ак-Орго", accent: "orange", shipPoint: "РЦ Ак-Орго" },
   { id: "pto", name: "ПТО", accent: "indigo", shipPoint: "РЦ РМ и ПТО" },
+  { id: "sagadalieva", name: "Садыгалиева (сыпучка)", accent: "sky", shipPoint: "РЦ Садыгалиева - сыпучка" },
 ];
 
 // итог на ГМ = паллеты + роллкейджи × коэффициент
