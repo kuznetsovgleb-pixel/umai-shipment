@@ -11,6 +11,7 @@ const ACCENT = {
   emerald: { text: "text-emerald-700", bg: "bg-emerald-600", dot: "bg-emerald-500" },
   orange: { text: "text-orange-700", bg: "bg-orange-600", dot: "bg-orange-500" },
   indigo: { text: "text-indigo-700", bg: "bg-indigo-600", dot: "bg-indigo-500" },
+  sky: { text: "text-sky-700", bg: "bg-sky-600", dot: "bg-sky-500" },
 };
 
 const todayISO = () => {
@@ -44,7 +45,7 @@ const rowIssues = (r) => {
   return { hasData: true, missingOrder, missingStore, missingQty, incomplete: missingOrder || missingStore || missingQty };
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
