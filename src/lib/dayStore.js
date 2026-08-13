@@ -29,9 +29,11 @@ export const emptyDay = () => ({
   rows_prigorodnoe: [makeEmptyRow()],
   rows_argo: [makeEmptyRow()],
   rows_pto: [makeEmptyRow()],
+  rows_sagadalieva: [makeEmptyRow()],
   submitted_prigorodnoe: false,
   submitted_argo: false,
   submitted_pto: false,
+  submitted_sagadalieva: false,
   vehicles: seedVehiclesForDay(),
 });
 
