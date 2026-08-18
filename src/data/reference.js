@@ -392,7 +392,13 @@ export const DRIVERS_REF = [
   { "carrier": "ТК", "lastName": "Кривобоков", "firstName": "Евгений" },
   { "carrier": "ТК", "lastName": "Карагулаков", "firstName": "Нурлан" },
   { "carrier": "ТК", "lastName": "Селезнев", "firstName": "Василий" },
-  { "carrier": "УмайГрупп", "lastName": "Болотбек у.", "firstName": "Элдияр" }
+  { "carrier": "УмайГрупп", "lastName": "Болотбек у.", "firstName": "Элдияр" },
+  { "carrier": "УмайГрупп", "lastName": "Абдиев", "firstName": "Нурлан" },
+  { "carrier": "УмайГрупп", "lastName": "Хашимахунов", "firstName": "Ильшад" },
+  { "carrier": "УмайГрупп", "lastName": "Эмирильясов", "firstName": "Сергей" },
+  { "carrier": "УмайГрупп", "lastName": "Клоджный", "firstName": "Глеб" },
+  { "carrier": "УмайГрупп", "lastName": "Абдинов", "firstName": "Бакыт" },
+  { "carrier": "УмайГрупп", "lastName": "Асангазиев", "firstName": "Байэл" }
 ];
 
 export const VEHICLES_TEMPLATE = [
@@ -406,12 +412,17 @@ export const VEHICLES_TEMPLATE = [
   { "extId": "KGFH2975", "plate": "2975FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т;ГБ", "from": "09:00", "to": "19:00", "start": "цо", "lastName": "Зинкиров", "firstName": "Бахтияр" },
   { "extId": "08KG575ACW", "plate": "08575ACW", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 9, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": "Селезнев", "firstName": "Василий" },
   { "extId": "KGFH1742", "plate": "1742FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Недоверительная;3т;5т", "from": "09:00", "to": "19:00", "start": "Жашылча", "lastName": null, "firstName": null },
-  { "extId": "01KG7988M", "plate": "017988M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 11, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "цо", "lastName": null, "firstName": null },
+  { "extId": "01KG7988M", "plate": "017988M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 11, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "цо", "lastName": "Эмирильясов", "firstName": "Сергей" },
   { "extId": "KGFH1741", "plate": "1741FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": "ао", "lastName": "Лайлиев", "firstName": "Элдияр" },
   { "extId": "01KG4344M", "plate": "014344M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 11, "tons": 5, "own": 1, "vip": 1, "skills": "Недоверительная;5т", "from": "11:00", "to": "19:00", "start": "садыгалиева", "lastName": null, "firstName": null },
   { "extId": "KGFH2353", "plate": "2353FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т", "from": "10:00", "to": "19:00", "start": "цо", "lastName": null, "firstName": null },
   { "extId": "01KG1186M", "plate": "011186M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 11, "tons": 5, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;5т", "from": "09:00", "to": "19:00", "start": "цо", "lastName": null, "firstName": null },
-  { "extId": "KGBH9039", "plate": "9039BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Недоверительная;3т;5т", "from": "09:00", "to": "19:00", "start": "цо", "lastName": null, "firstName": null }
+  { "extId": "KGBH9039", "plate": "9039BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Недоверительная;3т;5т", "from": "09:00", "to": "19:00", "start": "цо", "lastName": null, "firstName": null },
+  { "extId": "KGBH9038", "plate": "9038BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": null, "lastName": "Абдиев", "firstName": "Нурлан" },
+  { "extId": "KGFH3123", "plate": "3123FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": null, "lastName": "Хашимахунов", "firstName": "Ильшад" },
+  { "extId": "01KG1184M", "plate": "011184M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": null, "lastName": "Клоджный", "firstName": "Глеб" },
+  { "extId": "01KG0644M", "plate": "010644M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": null, "lastName": "Абдинов", "firstName": "Бакыт" },
+  { "extId": "KGBH9037", "plate": "9037BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": null, "lastName": "Асангазиев", "firstName": "Байэл" }
 ];
 
 export const WAREHOUSES = [
