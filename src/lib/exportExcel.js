@@ -18,7 +18,7 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
 
   const ordersHeader = [
     "Номер заказа *", "Дата доставки*", "Наименование точки отгрузки*", "Наименование точки доставки*",
-    "Кол-во ГМ", "Тип ГМ", "Окно приемки 1, с*", "Окно приемки 1, по*",
+    "Кол-во ГМ", "Тип ГМ", "Вес (брутто), кг", "Окно приемки 1, с*", "Окно приемки 1, по*",
     "Время на разгрузку, сек (на единицу груза)", "Время на разгрузку, сек (на точку)",
   ];
   const ordersRows = consolidated.map((r) => {
@@ -26,7 +26,7 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
     const [from, to] = win ? win.split("-") : ["", ""];
     return [
       r.order, dateLabel, r.shipPoint, r.store,
-      r.total, "Паллета", from, to,
+      r.total, "Паллета", r.weight, from, to,
       PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC,
     ];
   });
