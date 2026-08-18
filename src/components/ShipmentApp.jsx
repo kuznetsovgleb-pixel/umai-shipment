@@ -46,8 +46,8 @@ const sanitizeWeight = (raw) => {
 };
 
 // коэффициенты веса для складов без ручного ввода (кг)
-const PALLET_KG = 450;
-const ROLL_KG = 300;
+const PALLET_KG = 300;
+const ROLL_KG = 250;
 
 const rowIssues = (r, requiresWeight = false) => {
   const hasData = Boolean(
