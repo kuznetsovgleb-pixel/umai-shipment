@@ -4,7 +4,7 @@ import {
   Lock, Pencil, Check, Loader2, Wifi, Users,
 } from "lucide-react";
 import { WAREHOUSES, STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
-import { subscribeToDay, makeEmptyRow, emptyDay, saveWarehouseRows, setSubmitted, saveVehicles } from "../lib/dayStore";
+import { subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles } from "../lib/dayStore";
 import { downloadWorkbook } from "../lib/exportExcel";
 
 const ACCENT = {
@@ -36,13 +36,34 @@ const sanitizeQty = (raw) => {
   return "";
 };
 
-const rowIssues = (r) => {
-  const hasData = Boolean(r.order.trim() || r.store || r.pallets !== "" || r.rolls !== "");
-  if (!hasData) return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, incomplete: false };
+// вес — допускаем дробные значения (весы могут показывать граммы)
+const sanitizeWeight = (raw) => {
+  if (raw === "") return "";
+  let v = raw.replace(",", ".").replace(/[^\d.]/g, "");
+  const parts = v.split(".");
+  if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
+  return v;
+};
+
+// коэффициенты веса для складов без ручного ввода (кг)
+const PALLET_KG = 450;
+const ROLL_KG = 300;
+
+const rowIssues = (r, requiresWeight = false) => {
+  const hasData = Boolean(
+    r.order.trim() || r.store || r.pallets !== "" || r.rolls !== "" || (r.weight && r.weight !== "")
+  );
+  if (!hasData) {
+    return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, missingWeight: false, incomplete: false };
+  }
   const missingOrder = !r.order.trim();
   const missingStore = !r.store;
   const missingQty = r.pallets === "" && r.rolls === "";
-  return { hasData: true, missingOrder, missingStore, missingQty, incomplete: missingOrder || missingStore || missingQty };
+  const missingWeight = requiresWeight && (!r.weight || r.weight === "");
+  return {
+    hasData: true, missingOrder, missingStore, missingQty, missingWeight,
+    incomplete: missingOrder || missingStore || missingQty || missingWeight,
+  };
 };
 
 const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "otl"];
@@ -57,14 +78,18 @@ export default function ShipmentApp() {
   const [toast, setToast] = useState(null);
   const [activeTab, setActiveTab] = useState("prigorodnoe");
 
-  // подписка в реальном времени — если склад или ОТЛ поменяли что-то,
-  // все остальные видят это без перезагрузки
   useEffect(() => {
     setLoadingDay(true);
     const unsub = subscribeToDay(
       date,
       (data) => {
-        setDay(data);
+        if (!data.vehicles || data.vehicles.length === 0) {
+          const seeded = seedVehiclesForDay();
+          setDay({ ...data, vehicles: seeded });
+          saveVehicles(date, seeded).catch(() => {});
+        } else {
+          setDay(data);
+        }
         setLoadingDay(false);
       },
       () => setLoadingDay(false)
@@ -89,7 +114,6 @@ export default function ShipmentApp() {
     return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
   }, [day]);
 
-  // ---- склад: строки заказов (debounce перед записью в Firestore) ----
   const saveTimer = useRef(null);
   const patchWarehouseRows = useCallback(
     (whId, updater) => {
@@ -108,9 +132,13 @@ export default function ShipmentApp() {
 
   const updateRow = (whId, rowId, field, value) => {
     patchWarehouseRows(whId, (rows) =>
-      rows.map((r) =>
-        r.id === rowId ? { ...r, [field]: field === "pallets" || field === "rolls" ? sanitizeQty(value) : value } : r
-      )
+      rows.map((r) => {
+        if (r.id !== rowId) return r;
+        let v = value;
+        if (field === "pallets" || field === "rolls") v = sanitizeQty(value);
+        if (field === "weight") v = sanitizeWeight(value);
+        return { ...r, [field]: v };
+      })
     );
   };
   const pasteQty = (whId, rowId, field, raw) => updateRow(whId, rowId, field, sanitizeQty(raw));
@@ -119,9 +147,10 @@ export default function ShipmentApp() {
     patchWarehouseRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
 
   const submitWarehouse = async (whId) => {
-    const rows = (day[`rows_${whId}`] || []).filter((r) => rowIssues(r).hasData);
+    const wh = WAREHOUSES.find((w) => w.id === whId);
+    const rows = (day[`rows_${whId}`] || []).filter((r) => rowIssues(r, wh.requiresWeight).hasData);
     if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
-    const incompleteCount = rows.filter((r) => rowIssues(r).incomplete).length;
+    const incompleteCount = rows.filter((r) => rowIssues(r, wh.requiresWeight).incomplete).length;
     if (incompleteCount > 0) {
       return showToast(
         incompleteCount === 1
@@ -134,14 +163,13 @@ export default function ShipmentApp() {
 
     try {
       await setSubmitted(date, whId, true);
-      showToast(`${WAREHOUSES.find((w) => w.id === whId).name}: данные отправлены в транспортный отдел`);
+      showToast(`${wh.name}: данные отправлены в транспортный отдел`);
     } catch {
       showToast("Не удалось отправить — проверьте связь и попробуйте снова");
     }
   };
   const unlockWarehouse = (whId) => setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
-  // ---- ОТЛ: транспорт ----
   const patchVehicles = useCallback(
     (updater) => {
       setDay((current) => {
@@ -171,9 +199,13 @@ export default function ShipmentApp() {
         if (!r.order.trim()) return;
         const pallets = parseInt(r.pallets, 10) || 0;
         const rolls = parseInt(r.rolls, 10) || 0;
+        const weight = w.requiresWeight
+          ? parseFloat(r.weight) || 0
+          : pallets * PALLET_KG + rolls * ROLL_KG;
         rows.push({
           id: r.id, warehouse: w.name, shipPoint: w.shipPoint, accent: w.accent,
           order: r.order.trim(), store: r.store || "—", pallets, rolls,
+          weight: Math.round(weight * 100) / 100,
           total: Math.ceil((pallets + rolls * COEFFICIENT) * 100) / 100,
         });
       });
@@ -282,12 +314,9 @@ export default function ShipmentApp() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Вкладка склада
-// ---------------------------------------------------------------------------
-
 function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel }) {
   const a = ACCENT[wh.accent];
+  const requiresWeight = Boolean(wh.requiresWeight);
 
   return (
     <div>
@@ -296,7 +325,9 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
           <div className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${a.text} mb-1`}>
             <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Склад · {wh.name}
           </div>
-          <p className="text-sm text-stone-500">Заказ №, количество паллет и роллкейджей на {dateLabel}. Магазин выбирается из списка.</p>
+          <p className="text-sm text-stone-500">
+            Заказ №, количество паллет и роллкейджей{requiresWeight ? ", вес" : ""} на {dateLabel}. Магазин выбирается из списка.
+          </p>
         </div>
       </div>
 
@@ -320,13 +351,14 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
               <th className="text-left font-semibold px-4 py-3">Магазин</th>
               <th className="text-left font-semibold px-4 py-3 w-32">Паллеты</th>
               <th className="text-left font-semibold px-4 py-3 w-32">Роллы</th>
+              {requiresWeight && <th className="text-left font-semibold px-4 py-3 w-32">Вес, кг</th>}
               <th className="px-4 py-3 w-10" />
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => {
               const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
-              const issues = rowIssues(r);
+              const issues = rowIssues(r, requiresWeight);
               const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
               const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
               return (
@@ -374,6 +406,17 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                     />
                     {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите паллеты или роллы</div>}
                   </td>
+                  {requiresWeight && (
+                    <td className="px-4 py-2">
+                      <input
+                        type="text" inputMode="decimal" disabled={submitted} value={r.weight}
+                        onChange={(e) => onUpdate(r.id, "weight", e.target.value)}
+                        placeholder="0"
+                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingWeight ? errBorder : okBorder}`}
+                      />
+                      {issues.missingWeight && <div className="text-xs text-rose-600 mt-1">Укажите вес</div>}
+                    </td>
+                  )}
                   <td className="px-4 py-2 text-center">
                     {!submitted && (
                       <button onClick={() => onRemove(r.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
@@ -404,12 +447,9 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
   );
 }
 
-// ---------------------------------------------------------------------------
-// Вкладка ОТЛ
-// ---------------------------------------------------------------------------
-
 function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel }) {
   const totalPallets = consolidated.reduce((s, r) => s + r.total, 0);
+  const totalWeight = consolidated.reduce((s, r) => s + r.weight, 0);
   const [editingCapacity, setEditingCapacity] = useState({});
   const toggleEditCapacity = (id) => setEditingCapacity((prev) => ({ ...prev, [id]: !prev[id] }));
 
@@ -437,7 +477,8 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
               Консолидировано на {dateLabel} · {consolidated.length} заказ(ов)
             </h2>
             <p className="text-xs text-stone-400 mt-0.5">
-              Итого = паллеты + роллкейджи × {COEFFICIENT} · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку (фиксировано)
+              Итого = паллеты + роллкейджи × {COEFFICIENT} · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку (фиксировано) ·
+              вес: Садыгалиева — как указал склад, остальные — паллета {PALLET_KG} кг + роллкейдж {ROLL_KG} кг
             </p>
           </div>
           <button onClick={onExport} className="flex items-center gap-2 bg-stone-900 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-stone-700 transition-colors">
@@ -455,12 +496,13 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                 <th className="text-right font-semibold px-4 py-3">Паллеты</th>
                 <th className="text-right font-semibold px-4 py-3">Роллы</th>
                 <th className="text-right font-semibold px-4 py-3">Итого</th>
+                <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
               </tr>
             </thead>
             <tbody>
               {consolidated.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-stone-400">
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-stone-400">
                     Пока нет отправленных данных. Ждём кнопку «Отправить в транспортный отдел» на складах.
                   </td>
                 </tr>
@@ -479,6 +521,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                       <td className="px-4 py-2 text-right font-mono text-stone-600">{r.pallets}</td>
                       <td className="px-4 py-2 text-right font-mono text-stone-600">{r.rolls}</td>
                       <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{r.total}</td>
+                      <td className="px-4 py-2 text-right font-mono text-stone-600">{r.weight}</td>
                     </tr>
                   );
                 })
@@ -489,6 +532,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                 <tr className="border-t border-stone-200 bg-stone-50">
                   <td colSpan={5} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(totalPallets * 100) / 100}</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(totalWeight * 100) / 100}</td>
                 </tr>
               </tfoot>
             )}
