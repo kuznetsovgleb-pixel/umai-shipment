@@ -20,10 +20,10 @@ export const seedVehiclesForDay = () =>
     start: v.start || "",
     bodyType: v.bodyType || "",
     custom: false,
-    ready: false, // готовность подтверждается заново каждый день
+    ready: false,
   }));
 
-export const makeEmptyRow = () => ({ id: uid(), order: "", store: "", pallets: "", rolls: "" });
+export const makeEmptyRow = () => ({ id: uid(), order: "", store: "", pallets: "", rolls: "", weight: "" });
 
 export const emptyDay = () => ({
   rows_prigorodnoe: [makeEmptyRow()],
@@ -39,8 +39,6 @@ export const emptyDay = () => ({
 
 const dayRef = (date) => doc(db, "shipments", date);
 
-// подписка на документ дня в реальном времени — все, кто открыл эту дату,
-// видят изменения друг друга без ручного обновления страницы
 export function subscribeToDay(date, onChange, onError) {
   return onSnapshot(
     dayRef(date),
@@ -48,7 +46,6 @@ export function subscribeToDay(date, onChange, onError) {
       if (snap.exists()) {
         onChange(snap.data());
       } else {
-        // документа на эту дату ещё нет — создаём пустой (не блокируем чтение)
         const seed = emptyDay();
         setDoc(dayRef(date), seed).catch(() => {});
         onChange(seed);
@@ -65,7 +62,6 @@ export async function ensureDayExists(date) {
   }
 }
 
-// склад пишет только свои строки + свой флаг отправки (см. firestore.rules)
 export async function saveWarehouseRows(date, whId, rows) {
   await updateDoc(dayRef(date), { [`rows_${whId}`]: rows });
 }
@@ -74,7 +70,6 @@ export async function setSubmitted(date, whId, value) {
   await updateDoc(dayRef(date), { [`submitted_${whId}`]: value });
 }
 
-// ОТЛ пишет только машины
 export async function saveVehicles(date, vehicles) {
   await updateDoc(dayRef(date), { vehicles });
 }
