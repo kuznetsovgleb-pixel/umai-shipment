@@ -23,7 +23,7 @@ export const seedVehiclesForDay = () =>
     ready: false,
   }));
 
-export const makeEmptyRow = () => ({ id: uid(), order: "", store: "", pallets: "", rolls: "", weight: "" });
+export const makeEmptyRow = () => ({ id: uid(), order: "", store: "", pallets: "", rolls: "", euro: "", american: "", weight: "" });
 
 export const emptyDay = () => ({
   rows_prigorodnoe: [makeEmptyRow()],
