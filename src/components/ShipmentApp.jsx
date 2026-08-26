@@ -68,10 +68,25 @@ const rowIssues = (r, requiresWeight = false, useEuroAmerican = false) => {
   };
 };
 
+// магазины, которые встречаются в списке склада больше одного раза —
+// на один магазин может быть только один заказ
+const findDuplicateStores = (rows) => {
+  const counts = {};
+  rows.forEach((r) => {
+    const key = r.store.trim().toLowerCase();
+    if (!key) return;
+    counts[key] = (counts[key] || 0) + 1;
+  });
+  return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
+};
+
 const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
+
+// точки старта для собственных ТС (у ТК точки старта нет — поле неактивно)
+const START_POINT_OPTIONS = ["Центральный офис", "РЦ Пригородное", "РЦ Жашылча", "РЦ Садыгалиева - сыпучка", "РЦ РМ и ПТО"];
 
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
@@ -169,6 +184,10 @@ export default function ShipmentApp() {
     const hasDupe = rows.some((r) => duplicateOrders.has(r.order.trim().toLowerCase()));
     if (hasDupe) return showToast("Есть повторяющиеся номера заказов — исправьте перед отправкой");
 
+    const dupStores = findDuplicateStores(rows);
+    const hasDupeStore = rows.some((r) => dupStores.has(r.store.trim().toLowerCase()));
+    if (hasDupeStore) return showToast("На один магазин может быть только один заказ — исправьте повторяющиеся магазины");
+
     try {
       await setSubmitted(date, whId, true);
       showToast(`${wh.name}: данные отправлены в транспортный отдел`);
@@ -239,6 +258,8 @@ export default function ShipmentApp() {
     if (consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
     const readyCount = (day.vehicles || []).filter((v) => v.ready).length;
     if (readyCount === 0) return showToast("Сначала проставьте готовность хотя бы одного ТС на вкладке «Транспорт»");
+    const missingStart = (day.vehicles || []).some((v) => v.ready && v.carrier !== "ТК" && !v.start);
+    if (missingStart) return showToast("У готового собственного ТС не указана точка старта — заполните перед выгрузкой");
     downloadWorkbook(date, consolidated, day.vehicles);
     showToast("Файл сформирован и скачан");
   };
@@ -344,6 +365,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
   const a = ACCENT[wh.accent];
   const requiresWeight = Boolean(wh.requiresWeight);
   const useEuroAmerican = Boolean(wh.useEuroAmerican);
+  const duplicateStores = useMemo(() => findDuplicateStores(rows), [rows]);
 
   return (
     <div>
@@ -394,6 +416,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
           <tbody>
             {rows.map((r, i) => {
               const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
+              const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
               const issues = rowIssues(r, requiresWeight, useEuroAmerican);
               const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
               const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
@@ -414,7 +437,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                     <select
                       disabled={submitted} value={r.store}
                       onChange={(e) => onUpdate(r.id, "store", e.target.value)}
-                      className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingStore ? errBorder : okBorder}`}
+                      className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingStore || isDupeStore ? errBorder : okBorder}`}
                     >
                       <option value="">— выбрать магазин —</option>
                       {STORES.map((s) => (
@@ -422,6 +445,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                       ))}
                     </select>
                     {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
+                    {!issues.missingStore && isDupeStore && <div className="text-xs text-rose-600 mt-1">На этот магазин уже есть заказ в списке — проверьте дубли</div>}
                   </td>
                   {useEuroAmerican ? (
                     <>
@@ -623,6 +647,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                 <th className="text-left font-semibold px-4 py-3">Перевозчик</th>
                 <th className="text-left font-semibold px-4 py-3">Водитель</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Тип кузова</th>
+                <th className="text-left font-semibold px-4 py-3 w-40">Точка старта</th>
                 <th className="text-right font-semibold px-4 py-3">Вместимость, палл.</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Погрузка с</th>
                 <th className="text-left font-semibold px-4 py-3 w-36">Готов на завтра</th>
@@ -659,6 +684,19 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                       placeholder="напр. РЕФ"
                       className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400"
                     />
+                  </td>
+                  <td className="px-4 py-2">
+                    <select
+                      disabled={v.carrier === "ТК"}
+                      value={v.start || ""}
+                      onChange={(e) => onUpdateVehicle(v.id, "start", e.target.value)}
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
+                    >
+                      <option value="">— выбрать точку —</option>
+                      {START_POINT_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
                   </td>
                   <td className="px-4 py-2">
                     <div className="flex items-center justify-end gap-1.5">
