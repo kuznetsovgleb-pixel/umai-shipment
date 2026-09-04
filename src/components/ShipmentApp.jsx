@@ -12,6 +12,9 @@ const ACCENT = {
   orange: { text: "text-orange-700", bg: "bg-orange-600", dot: "bg-orange-500" },
   indigo: { text: "text-indigo-700", bg: "bg-indigo-600", dot: "bg-indigo-500" },
   sky: { text: "text-sky-700", bg: "bg-sky-600", dot: "bg-sky-500" },
+  rose: { text: "text-rose-700", bg: "bg-rose-600", dot: "bg-rose-500" },
+  amber: { text: "text-amber-700", bg: "bg-amber-600", dot: "bg-amber-500" },
+  violet: { text: "text-violet-700", bg: "bg-violet-600", dot: "bg-violet-500" },
 };
 
 const todayISO = () => {
@@ -45,15 +48,22 @@ const sanitizeWeight = (raw) => {
   return v;
 };
 
-// коэффициенты веса для складов без ручного ввода (кг)
+// коэффициенты веса для складов без ручного ввода (кг за паллето-эквивалент)
 const PALLET_KG = 300;
 const ROLL_KG = 250;
 
-// пересчёт американских паллет в обычные (евро) для Садыгалиева
+// пересчёт американских паллет в обычные (евро) для Садыгалиева-сыпучка
 const EURO_AMERICAN_COEF = 1.2;
 
-const rowIssues = (r, requiresWeight = false, useEuroAmerican = false) => {
-  const qtyFilled = useEuroAmerican ? (r.euro !== "" || r.american !== "") : (r.pallets !== "" || r.rolls !== "");
+// коробки → паллето-эквивалент: до 20 шт — 0.5 паллеты, от 20 до 40 — целая паллета,
+// дальше по той же логике (каждые следующие 20 коробок = ещё +0.5 паллеты)
+const boxesToPallets = (boxes) => (boxes > 0 ? Math.ceil(boxes / 20) * 0.5 : 0);
+
+const rowIssues = (r, requiresWeight = false, qtyMode = "default") => {
+  const qtyFilled =
+    qtyMode === "euroAmerican" ? (r.euro !== "" || r.american !== "") :
+    qtyMode === "palletsBoxes" ? (r.pallets !== "" || r.boxes !== "") :
+    (r.pallets !== "" || r.rolls !== "");
   const hasData = Boolean(r.order.trim() || r.store || qtyFilled || (r.weight && r.weight !== ""));
   if (!hasData) {
     return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, missingWeight: false, incomplete: false };
@@ -80,13 +90,13 @@ const findDuplicateStores = (rows) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
 
 // точки старта для собственных ТС (у ТК точки старта нет — поле неактивно)
-const START_POINT_OPTIONS = ["Центральный офис", "РЦ Пригородное", "РЦ Жашылча", "РЦ Садыгалиева - сыпучка", "РЦ РМ и ПТО"];
+const START_POINT_OPTIONS = ["Центральный офис", "РЦ Пригородное", "РЦ Жашылча", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка", "РЦ РМ и ПТО"];
 
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
@@ -158,7 +168,7 @@ export default function ShipmentApp() {
       rows.map((r) => {
         if (r.id !== rowId) return r;
         let v = value;
-        if (field === "pallets" || field === "rolls" || field === "euro" || field === "american") v = sanitizeQty(value);
+        if (field === "pallets" || field === "rolls" || field === "euro" || field === "american" || field === "boxes") v = sanitizeQty(value);
         if (field === "weight") v = sanitizeWeight(value);
         return { ...r, [field]: v };
       })
@@ -171,9 +181,10 @@ export default function ShipmentApp() {
 
   const submitWarehouse = async (whId) => {
     const wh = WAREHOUSES.find((w) => w.id === whId);
-    const rows = (day[`rows_${whId}`] || []).filter((r) => rowIssues(r, wh.requiresWeight, wh.useEuroAmerican).hasData);
+    const qtyMode = wh.qtyMode || "default";
+    const rows = (day[`rows_${whId}`] || []).filter((r) => rowIssues(r, wh.requiresWeight, qtyMode).hasData);
     if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
-    const incompleteCount = rows.filter((r) => rowIssues(r, wh.requiresWeight, wh.useEuroAmerican).incomplete).length;
+    const incompleteCount = rows.filter((r) => rowIssues(r, wh.requiresWeight, qtyMode).incomplete).length;
     if (incompleteCount > 0) {
       return showToast(
         incompleteCount === 1
@@ -223,30 +234,34 @@ export default function ShipmentApp() {
     const rows = [];
     WAREHOUSES.forEach((w) => {
       if (!day[`submitted_${w.id}`]) return;
+      const qtyMode = w.qtyMode || "default";
       (day[`rows_${w.id}`] || []).forEach((r) => {
         if (!r.order.trim()) return;
         const weight = w.requiresWeight ? parseFloat(r.weight) || 0 : null;
 
-        let pallets, rolls, euro, american, total;
-        if (w.useEuroAmerican) {
+        let pallets = null, rolls = null, euro = null, american = null, boxes = null, total;
+
+        if (qtyMode === "euroAmerican") {
           euro = parseInt(r.euro, 10) || 0;
           american = parseInt(r.american, 10) || 0;
-          pallets = null;
-          rolls = null;
           total = Math.ceil((euro + american * EURO_AMERICAN_COEF) * 100) / 100;
+        } else if (qtyMode === "palletsBoxes") {
+          pallets = parseInt(r.pallets, 10) || 0;
+          boxes = parseInt(r.boxes, 10) || 0;
+          total = Math.ceil((pallets + boxesToPallets(boxes)) * 100) / 100;
         } else {
           pallets = parseInt(r.pallets, 10) || 0;
           rolls = parseInt(r.rolls, 10) || 0;
-          euro = null;
-          american = null;
           total = Math.ceil((pallets + rolls * COEFFICIENT) * 100) / 100;
         }
+
+        const fallbackWeight = qtyMode === "palletsBoxes" ? total * PALLET_KG : (pallets || 0) * PALLET_KG + (rolls || 0) * ROLL_KG;
 
         rows.push({
           id: r.id, warehouse: w.name, shipPoint: w.shipPoint, accent: w.accent,
           order: r.order.trim(), store: r.store || "—",
-          pallets, rolls, euro, american,
-          weight: weight === null ? Math.round((pallets * PALLET_KG + rolls * ROLL_KG) * 100) / 100 : Math.round(weight * 100) / 100,
+          pallets, rolls, euro, american, boxes,
+          weight: weight === null ? Math.round(fallbackWeight * 100) / 100 : Math.round(weight * 100) / 100,
           total,
         });
       });
@@ -263,6 +278,8 @@ export default function ShipmentApp() {
     downloadWorkbook(date, consolidated, day.vehicles);
     showToast("Файл сформирован и скачан");
   };
+
+  const tabLabel = (id) => (id === "otl" ? "Для ОТЛ" : WAREHOUSES.find((w) => w.id === id)?.name);
 
   return (
     <div className="min-h-screen bg-stone-50 text-stone-900 font-sans">
@@ -307,7 +324,7 @@ export default function ShipmentApp() {
                 }`}
               >
                 {isOtl ? <Truck size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
-                {isOtl ? "Для ОТЛ" : w.name}
+                {tabLabel(id)}
                 {sub && <Lock size={12} className="text-stone-400" />}
                 {active && <span className={`absolute left-0 right-0 -bottom-px h-0.5 ${isOtl ? "bg-stone-800" : a.bg}`} />}
               </button>
@@ -364,8 +381,13 @@ export default function ShipmentApp() {
 function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel }) {
   const a = ACCENT[wh.accent];
   const requiresWeight = Boolean(wh.requiresWeight);
-  const useEuroAmerican = Boolean(wh.useEuroAmerican);
+  const qtyMode = wh.qtyMode || "default";
   const duplicateStores = useMemo(() => findDuplicateStores(rows), [rows]);
+
+  const qtyDescription =
+    qtyMode === "euroAmerican" ? "количество евро- и американских паллет" :
+    qtyMode === "palletsBoxes" ? "количество паллет и коробок" :
+    "количество паллет и роллкейджей";
 
   return (
     <div>
@@ -375,7 +397,8 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
             <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Склад · {wh.name}
           </div>
           <p className="text-sm text-stone-500">
-            Заказ №, {useEuroAmerican ? "количество евро- и американских паллет" : "количество паллет и роллкейджей"}{requiresWeight ? ", вес" : ""} на {dateLabel}. Магазин выбирается из списка.
+            Заказ №, {qtyDescription}{requiresWeight ? ", вес" : ""} на {dateLabel}. Магазин выбирается из списка.
+            {qtyMode === "palletsBoxes" && " Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее)."}
           </p>
         </div>
       </div>
@@ -398,12 +421,19 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
               <th className="text-left font-semibold px-4 py-3 w-10">#</th>
               <th className="text-left font-semibold px-4 py-3 w-40">Заказ №</th>
               <th className="text-left font-semibold px-4 py-3">Магазин</th>
-              {useEuroAmerican ? (
+              {qtyMode === "euroAmerican" && (
                 <>
                   <th className="text-left font-semibold px-4 py-3 w-32">Евро</th>
                   <th className="text-left font-semibold px-4 py-3 w-32">Американцы</th>
                 </>
-              ) : (
+              )}
+              {qtyMode === "palletsBoxes" && (
+                <>
+                  <th className="text-left font-semibold px-4 py-3 w-32">Паллеты</th>
+                  <th className="text-left font-semibold px-4 py-3 w-32">Коробки</th>
+                </>
+              )}
+              {qtyMode === "default" && (
                 <>
                   <th className="text-left font-semibold px-4 py-3 w-32">Паллеты</th>
                   <th className="text-left font-semibold px-4 py-3 w-32">Роллы</th>
@@ -417,7 +447,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
             {rows.map((r, i) => {
               const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
               const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
-              const issues = rowIssues(r, requiresWeight, useEuroAmerican);
+              const issues = rowIssues(r, requiresWeight, qtyMode);
               const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
               const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
               return (
@@ -447,7 +477,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                     {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
                     {!issues.missingStore && isDupeStore && <div className="text-xs text-rose-600 mt-1">На этот магазин уже есть заказ в списке — проверьте дубли</div>}
                   </td>
-                  {useEuroAmerican ? (
+                  {qtyMode === "euroAmerican" && (
                     <>
                       <td className="px-4 py-2">
                         <input
@@ -469,7 +499,31 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                         {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите евро или американец</div>}
                       </td>
                     </>
-                  ) : (
+                  )}
+                  {qtyMode === "palletsBoxes" && (
+                    <>
+                      <td className="px-4 py-2">
+                        <input
+                          type="text" inputMode="numeric" disabled={submitted} value={r.pallets}
+                          onChange={(e) => onUpdate(r.id, "pallets", e.target.value)}
+                          onPaste={(e) => { e.preventDefault(); onPasteQty(r.id, "pallets", e.clipboardData.getData("text")); }}
+                          placeholder="0"
+                          className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          type="text" inputMode="numeric" disabled={submitted} value={r.boxes}
+                          onChange={(e) => onUpdate(r.id, "boxes", e.target.value)}
+                          onPaste={(e) => { e.preventDefault(); onPasteQty(r.id, "boxes", e.clipboardData.getData("text")); }}
+                          placeholder="0"
+                          className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                        />
+                        {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите паллеты или коробки</div>}
+                      </td>
+                    </>
+                  )}
+                  {qtyMode === "default" && (
                     <>
                       <td className="px-4 py-2">
                         <input
@@ -567,8 +621,9 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
               Консолидировано на {dateLabel} · {consolidated.length} заказ(ов)
             </h2>
             <p className="text-xs text-stone-400 mt-0.5">
-              Итого: паллеты + роллкейджи × {COEFFICIENT} (кроме Садыгалиева — евро + американцы × {EURO_AMERICAN_COEF}) · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку (фиксировано) ·
-              вес: Садыгалиева — как указал склад, остальные — паллета {PALLET_KG} кг + роллкейдж {ROLL_KG} кг
+              Итого: паллеты + роллкейджи × {COEFFICIENT} (Садыгалиева-сыпучка — евро + американцы × {EURO_AMERICAN_COEF}; Заморозка/Хлебзавод/ККЦП — паллеты + коробки по ступеням 20/40) ·
+              разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку (фиксировано) ·
+              вес: Садыгалиева-сыпучка — как указал склад, остальные — паллето-эквивалент × {PALLET_KG} кг
             </p>
           </div>
           <button onClick={onExport} className="flex items-center gap-2 bg-stone-900 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-stone-700 transition-colors">
@@ -576,7 +631,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
           </button>
         </div>
 
-        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
+        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
@@ -587,6 +642,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                 <th className="text-right font-semibold px-4 py-3">Роллы</th>
                 <th className="text-right font-semibold px-4 py-3">Евро</th>
                 <th className="text-right font-semibold px-4 py-3">Американцы</th>
+                <th className="text-right font-semibold px-4 py-3">Коробки</th>
                 <th className="text-right font-semibold px-4 py-3">Итого</th>
                 <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
               </tr>
@@ -594,7 +650,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
             <tbody>
               {consolidated.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-stone-400">
+                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-stone-400">
                     Пока нет отправленных данных. Ждём кнопку «Отправить в транспортный отдел» на складах.
                   </td>
                 </tr>
@@ -614,6 +670,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                       <td className="px-4 py-2 text-right font-mono text-stone-600">{r.rolls ?? "—"}</td>
                       <td className="px-4 py-2 text-right font-mono text-stone-600">{r.euro ?? "—"}</td>
                       <td className="px-4 py-2 text-right font-mono text-stone-600">{r.american ?? "—"}</td>
+                      <td className="px-4 py-2 text-right font-mono text-stone-600">{r.boxes ?? "—"}</td>
                       <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{r.total}</td>
                       <td className="px-4 py-2 text-right font-mono text-stone-600">{r.weight}</td>
                     </tr>
@@ -624,7 +681,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
             {consolidated.length > 0 && (
               <tfoot>
                 <tr className="border-t border-stone-200 bg-stone-50">
-                  <td colSpan={7} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
+                  <td colSpan={8} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(totalPallets * 100) / 100}</td>
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(totalWeight * 100) / 100}</td>
                 </tr>
