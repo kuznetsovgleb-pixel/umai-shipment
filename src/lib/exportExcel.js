@@ -33,15 +33,20 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
 
   const vehiclesHeader = [
     "ExtID", "Госномер", "Наименование перевозчика", "Готовность", "Тип кузова", "Паллетовместимость, шт",
-    "Фактическая грузоподъемность, т", "Собственный", "Vip", "Скиллы",
+    "Фактическая грузоподъемность, т", "Собственный", "Vip", "Приоритетные зоны доставки", "Скиллы",
     "Время погрузки ТС, с", "Время погрузки ТС, по", "Наименование точки старта",
     "Водитель (Фамилия)", "Водитель (Имя)",
   ];
-  const vehiclesRows = vehicles.map((v) => [
-    v.extId || "", v.plate, v.carrier, v.ready ? 1 : 0, v.bodyType || "", v.pallets || "",
-    v.tons || "", v.custom ? 0 : 1, v.custom ? 0 : 1, v.skills || "",
-    v.from || "", v.to || "", v.start || "", v.driverLastName || "", v.driverFirstName || "",
-  ]);
+  const vehiclesRows = vehicles.map((v) => {
+    // собственный транспорт (не ТК) имеет приоритет над наёмным —
+    // именно перевозчик определяет это, а не устаревшие поля own/vip
+    const isOwn = v.carrier !== "ТК";
+    return [
+      v.extId || "", v.plate, v.carrier, v.ready ? 1 : 0, v.bodyType || "", v.pallets || "",
+      v.tons || "", isOwn ? 1 : 0, isOwn ? 1 : 0, isOwn ? "Бишкек_город" : "Бишкек_пригород", v.skills || "",
+      v.from || "", v.to || "", v.start || "", v.driverLastName || "", v.driverFirstName || "",
+    ];
+  });
 
   const driversHeader = ["Наименование перевозчика", "Фамилия", "Имя"];
   const driversRows = DRIVERS_REF.map((d) => [d.carrier, d.lastName, d.firstName]);
