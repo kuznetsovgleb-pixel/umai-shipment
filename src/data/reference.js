@@ -535,7 +535,3 @@ export const COEFFICIENT = 0.72;
 // фиксированные лимиты на разгрузку (сек)
 export const PALLET_UNLOAD_SEC = 300;
 export const POINT_UNLOAD_SEC = 900;
-
-// фиксированные лимиты на разгрузку (сек)
-export const PALLET_UNLOAD_SEC = 300;
-export const POINT_UNLOAD_SEC = 900;
