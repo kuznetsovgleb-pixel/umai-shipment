@@ -23,17 +23,27 @@ export const seedVehiclesForDay = () =>
     ready: false,
   }));
 
-export const makeEmptyRow = () => ({ id: uid(), order: "", store: "", pallets: "", rolls: "", euro: "", american: "", weight: "" });
+export const makeEmptyRow = () => ({
+  id: uid(), order: "", store: "",
+  pallets: "", rolls: "", euro: "", american: "", boxes: "",
+  weight: "",
+});
 
 export const emptyDay = () => ({
   rows_prigorodnoe: [makeEmptyRow()],
   rows_argo: [makeEmptyRow()],
   rows_pto: [makeEmptyRow()],
   rows_sagadalieva: [makeEmptyRow()],
+  rows_sagadalieva_zamorozka: [makeEmptyRow()],
+  rows_hlebzavod: [makeEmptyRow()],
+  rows_kkcp: [makeEmptyRow()],
   submitted_prigorodnoe: false,
   submitted_argo: false,
   submitted_pto: false,
   submitted_sagadalieva: false,
+  submitted_sagadalieva_zamorozka: false,
+  submitted_hlebzavod: false,
+  submitted_kkcp: false,
   vehicles: seedVehiclesForDay(),
 });
 
