@@ -1,5 +1,3 @@
-// Справочные данные из файла "Шаблон импорта в ТМС"
-
 export const STORES = [
   "Глобус 1",
   "Глобус 2 Сокулук",
@@ -99,7 +97,6 @@ export const STORES = [
   "Глобус96",
   "Глобус97 Балыкчы-2",
   "Глобус98",
-  "Глобус99",
   "Достор 1 Калык-Акиева",
   "Достор 2 Республиканская",
   "Достор 3 Молодая Гвардия",
@@ -184,6 +181,7 @@ export const STORES = [
   "Кондитерское Центральное Производство",
   "РЦ Транзит ИК",
   "РЦ Садыгалиева - сыпучка",
+  "РЦ Садыгалиева - заморозка",
   "РЦ РМ и ПТО",
   "РЦ Пригородное",
   "РЦ Мурманская - основной",
@@ -229,7 +227,7 @@ export const STORES = [
   "SPAR-09 Исанова СП",
   "SPAR-07 Мичурина СП",
   "SPAR-01 ЦГ СП",
-  "SPAR-12 Манаса СП",
+  "SPAR-12 Манаса СП"
 ];
 
 export const STORE_WINDOWS = {
@@ -331,7 +329,6 @@ export const STORE_WINDOWS = {
   "Глобус96": "09:00-17:20",
   "Глобус97 Балыкчы-2": "09:00-17:20",
   "Глобус98": "09:00-17:20",
-  "Глобус99": "09:00-17:20",
   "Достор 1 Калык-Акиева": "09:00-17:00",
   "Достор 2 Республиканская": "09:00-17:00",
   "Достор 3 Молодая Гвардия": "09:00-17:00",
@@ -416,6 +413,7 @@ export const STORE_WINDOWS = {
   "Кондитерское Центральное Производство": "09:00-17:00",
   "РЦ Транзит ИК": "09:00-17:00",
   "РЦ Садыгалиева - сыпучка": "09:00-17:00",
+  "РЦ Садыгалиева - заморозка": "09:00-17:00",
   "РЦ РМ и ПТО": "09:00-17:00",
   "РЦ Пригородное": "09:00-17:00",
   "РЦ Мурманская - основной": "09:00-17:00",
@@ -461,7 +459,7 @@ export const STORE_WINDOWS = {
   "SPAR-09 Исанова СП": "09:00-17:20",
   "SPAR-07 Мичурина СП": "09:00-17:20",
   "SPAR-01 ЦГ СП": "09:00-17:20",
-  "SPAR-12 Манаса СП": "09:00-17:20",
+  "SPAR-12 Манаса СП": "09:00-17:20"
 };
 
 export const DRIVERS_REF = [
@@ -480,41 +478,63 @@ export const DRIVERS_REF = [
   { "carrier": "УмайГрупп", "lastName": "Абдинов", "firstName": "Бакыт" },
   { "carrier": "УмайГрупп", "lastName": "Асангазиев", "firstName": "Байэл" },
   { "carrier": "УмайГрупп", "lastName": "Дьяковский", "firstName": "Виталий" },
-  { "carrier": "УмайГрупп", "lastName": "Курманов", "firstName": "Жыргалбек" }
+  { "carrier": "УмайГрупп", "lastName": "Курманов", "firstName": "Жыргалбек" },
+  { "carrier": "УмайГрупп", "lastName": "Муканбетов", "firstName": "Эмиль" },
+  { "carrier": "УмайГрупп", "lastName": "Абдрахманов", "firstName": "Бекбол" },
+  { "carrier": "УмайГрупп", "lastName": "Толонов", "firstName": "Элдияр" },
+  { "carrier": "УмайГрупп", "lastName": "Касымбеков", "firstName": "Султан" },
+  { "carrier": "УмайГрупп", "lastName": "Айбек уулу", "firstName": "Азамат" },
+  { "carrier": "ТК", "lastName": "Бекдолот уулу", "firstName": "Бектур" },
+  { "carrier": "ТК", "lastName": "Чичасов", "firstName": "Виктор" }
 ];
 
 export const VEHICLES_TEMPLATE = [
-  {"extId": "01KG9494M", "plate": "019494M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "РЦ Пригородное", "lastName": "Ларин", "firstName": "Илья"},
-  {"extId": "08KG566AWB", "plate": "08566AWB", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 8, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": null, "firstName": null},
-  {"extId": "01KG5100M", "plate": "015100M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 5, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;5т;ГБ", "from": "08:00", "to": "19:00", "start": "РЦ Пригородное", "lastName": "Абраманов", "firstName": "Тынчтык"},
-  {"extId": "08KG125ANY", "plate": "08125ANY", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 8, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": "Кривобоков", "firstName": "Евгений"},
-  {"extId": "01KG7991M", "plate": "017991M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null},
-  {"extId": "KGBH0508", "plate": "0508BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Болотбек Уулу", "firstName": "Элдияр"},
-  {"extId": "S1397AK", "plate": "S1397AK", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 8, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": "Карагулаков", "firstName": "Нурлан"},
-  {"extId": "KGFH2975", "plate": "2975FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Зинкиров", "firstName": "Бахтияр"},
-  {"extId": "08KG575ACW", "plate": "08575ACW", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 8, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": "Селезнев", "firstName": "Василий"},
-  {"extId": "KGFH1742", "plate": "1742FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Недоверительная;3т;5т", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null},
-  {"extId": "01KG7988M", "plate": "017988M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Эмирильясов", "firstName": "Сергей"},
-  {"extId": "KGFH1741", "plate": "1741FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": "РЦ Садыгалиева - сыпучка", "lastName": "Лайлиев", "firstName": "Элдияр"},
-  {"extId": "01KG4344M", "plate": "014344M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 5, "own": 1, "vip": 1, "skills": "Недоверительная;5т", "from": "11:00", "to": "19:00", "start": "РЦ Садыгалиева - сыпучка", "lastName": "Дьяковский", "firstName": "Виталий"},
-  {"extId": "KGFH2353", "plate": "2353FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т", "from": "10:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null},
-  {"extId": "01KG1186M", "plate": "011186M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 5, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;5т", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null},
-  {"extId": "KGBH9039", "plate": "9039BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Недоверительная;3т;5т", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Курманов", "firstName": "Жыргалбек"},
-  {"extId": "KGBH9038", "plate": "9038BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Абдиев", "firstName": "Нурлан"},
-  {"extId": "KGFH3123", "plate": "3123FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Хашимахунов", "firstName": "Ильшад"},
-  {"extId": "01KG1184M", "plate": "011184M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Колодяжный", "firstName": "Глеб"},
-  {"extId": "01KG0644M", "plate": "010644M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Абдинов", "firstName": "Бакыт"},
-  {"extId": "KGBH9037", "plate": "9037BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Асангазиев", "firstName": "Байэл"},
+  { "extId": "01KG9494M", "plate": "019494M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "РЦ Пригородное", "lastName": "Ларин", "firstName": "Илья" },
+  { "extId": "08KG566AWB", "plate": "08566AWB", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 8, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": null, "firstName": null },
+  { "extId": "01KG5100M", "plate": "015100M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 5, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;5т;ГБ", "from": "08:00", "to": "19:00", "start": "РЦ Пригородное", "lastName": "Абраманов", "firstName": "Тынчтык" },
+  { "extId": "08KG125ANY", "plate": "08125ANY", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 8, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": "Кривобоков", "firstName": "Евгений" },
+  { "extId": "01KG7991M", "plate": "017991M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null },
+  { "extId": "KGBH0508", "plate": "0508BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Болотбек Уулу", "firstName": "Элдияр" },
+  { "extId": "S1397AK", "plate": "S1397AK", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 8, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": "Карагулаков", "firstName": "Нурлан" },
+  { "extId": "KGFH2975", "plate": "2975FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Зинкиров", "firstName": "Бахтияр" },
+  { "extId": "08KG575ACW", "plate": "08575ACW", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 8, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": null, "lastName": "Селезнев", "firstName": "Василий" },
+  { "extId": "KGFH1742", "plate": "1742FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Недоверительная;3т;5т", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null },
+  { "extId": "01KG7988M", "plate": "017988M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Эмирильясов", "firstName": "Сергей" },
+  { "extId": "KGFH1741", "plate": "1741FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т;ГБ", "from": "08:00", "to": "19:00", "start": "РЦ Садыгалиева - сыпучка", "lastName": "Лайлиев", "firstName": "Элдияр" },
+  { "extId": "01KG4344M", "plate": "014344M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 5, "own": 1, "vip": 1, "skills": "Недоверительная;5т", "from": "11:00", "to": "19:00", "start": "РЦ Садыгалиева - сыпучка", "lastName": "Дьяковский", "firstName": "Виталий" },
+  { "extId": "KGFH2353", "plate": "2353FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;3т;5т", "from": "10:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null },
+  { "extId": "01KG1186M", "plate": "011186M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 5, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;5т", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null },
+  { "extId": "KGBH9039", "plate": "9039BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Недоверительная;3т;5т", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Курманов", "firstName": "Жыргалбек" },
+  { "extId": "KGBH9038", "plate": "9038BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Абдиев", "firstName": "Нурлан" },
+  { "extId": "KGFH3123", "plate": "3123FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Хашимахунов", "firstName": "Ильшад" },
+  { "extId": "01KG1184M", "plate": "011184M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Колодяжный", "firstName": "Глеб" },
+  { "extId": "01KG0644M", "plate": "010644M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;ГБ", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Абдинов", "firstName": "Бакыт" },
+  { "extId": "KGBH9037", "plate": "9037BH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная;Недоверительная;", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": "Асангазиев", "firstName": "Байэл" },
+  { "extId": "01KG3976M", "plate": "013976M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная", "from": "09:00", "to": "19:00", "start": "РЦ Садыгалиева - заморозка", "lastName": "Муканбетов", "firstName": "Эмиль" },
+  { "extId": "01KG3977M", "plate": "013977M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная", "from": "09:00", "to": "19:00", "start": "РЦ Садыгалиева - заморозка", "lastName": "Абдрахманов", "firstName": "Бекбол" },
+  { "extId": "01KG9698M", "plate": "019698M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "Доверительная", "from": "09:00", "to": "19:00", "start": "РЦ Садыгалиева - заморозка", "lastName": "Толонов", "firstName": "Элдияр" },
+  { "extId": "01KG299BV", "plate": "01299BV", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 7, "own": 1, "vip": 1, "skills": "Доверительная", "from": "09:00", "to": "19:00", "start": "РЦ Садыгалиева - заморозка", "lastName": "Касымбеков", "firstName": "Султан" },
+  { "extId": "KGFH3218", "plate": "3218FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 5, "tons": 3, "own": 1, "vip": 1, "skills": "Доверительная", "from": "09:00", "to": "19:00", "start": "РЦ Садыгалиева - заморозка", "lastName": "Айбек уулу", "firstName": "Азамат" },
+  { "extId": "08KG802AWM", "plate": "08802AWM", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная", "from": "09:00", "to": "19:00", "start": null, "lastName": "Бекдолот уулу", "firstName": "Бектур" },
+  { "extId": "01KG522AZK", "plate": "01522AZK", "carrier": "ТК", "bodyType": "РЕФ", "pallets": 7, "tons": 3, "own": 0, "vip": 0, "skills": "Доверительная", "from": "09:00", "to": "19:00", "start": null, "lastName": "Чичасов", "firstName": "Виктор" }
 ];
+
 export const WAREHOUSES = [
   { id: "prigorodnoe", name: "Пригородное", accent: "emerald", shipPoint: "РЦ Пригородное" },
   { id: "argo", name: "Ак-Орго", accent: "orange", shipPoint: "РЦ Ак-Орго" },
   { id: "pto", name: "ПТО", accent: "indigo", shipPoint: "РЦ РМ и ПТО" },
-{ id: "sagadalieva", name: "Садыгалиева (сыпучка)", accent: "sky", shipPoint: "РЦ Садыгалиева - сыпучка", requiresWeight: true, useEuroAmerican: true },
+  { id: "sagadalieva", name: "Садыгалиева (сыпучка)", accent: "sky", shipPoint: "РЦ Садыгалиева - сыпучка", requiresWeight: true, qtyMode: "euroAmerican" },
+  { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose", shipPoint: "РЦ Садыгалиева - заморозка", qtyMode: "palletsBoxes" },
+  { id: "hlebzavod", name: "Хлебзавод", accent: "amber", shipPoint: "СП Хлебозавод", qtyMode: "palletsBoxes" },
+  { id: "kkcp", name: "ККЦП", accent: "violet", shipPoint: "Кондитерское Центральное Производство", qtyMode: "palletsBoxes" },
 ];
 
 // итог на ГМ = паллеты + роллкейджи × коэффициент
 export const COEFFICIENT = 0.72;
+
+// фиксированные лимиты на разгрузку (сек)
+export const PALLET_UNLOAD_SEC = 300;
+export const POINT_UNLOAD_SEC = 900;
 
 // фиксированные лимиты на разгрузку (сек)
 export const PALLET_UNLOAD_SEC = 300;
