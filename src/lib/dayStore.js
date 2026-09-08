@@ -20,6 +20,7 @@ export const seedVehiclesForDay = () =>
     start: v.start || "",
     bodyType: v.bodyType || "",
     gb: Boolean(v.gb),
+    maxPoints: v.maxPoints || "",
     custom: false,
     ready: false,
   }));
