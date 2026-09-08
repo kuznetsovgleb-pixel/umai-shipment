@@ -98,6 +98,20 @@ const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).
 // точки старта для собственных ТС (у ТК точки старта нет — поле неактивно)
 const START_POINT_OPTIONS = ["Центральный офис", "РЦ Пригородное", "РЦ Жашылча", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка", "РЦ РМ и ПТО"];
 
+// перевозчик — теперь фиксированный список, а не свободный текст
+const CARRIER_OPTIONS = ["УмайГрупп", "ТК"];
+
+// товарная группа для выгрузки — по складу
+const GROUP_BY_WAREHOUSE = {
+  prigorodnoe: "сухой",
+  argo: "сухой",
+  pto: "оборудование",
+  sagadalieva: "сыпучка",
+  sagadalieva_zamorozka: "заморозка",
+  hlebzavod: "СП",
+  kkcp: "СП",
+};
+
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
   const [day, setDay] = useState(emptyDay());
@@ -225,7 +239,7 @@ export default function ShipmentApp() {
   const addVehicle = () =>
     patchVehicles((vs) => [
       ...vs,
-      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "", driverLastName: "", driverFirstName: "", pallets: "", tons: "", skills: "", from: "08:00", to: "", start: "", bodyType: "", custom: true, ready: false },
+      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "", driverLastName: "", driverFirstName: "", pallets: "", tons: "", skills: "", from: "08:00", to: "19:00", start: "", bodyType: "", gb: false, custom: true, ready: false },
     ]);
   const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
@@ -256,6 +270,7 @@ export default function ShipmentApp() {
         }
 
         const fallbackWeight = qtyMode === "palletsBoxes" ? total * PALLET_KG : (pallets || 0) * PALLET_KG + (rolls || 0) * ROLL_KG;
+        const unloadSec = w.unloadPerPalletSec || PALLET_UNLOAD_SEC;
 
         rows.push({
           id: r.id, warehouse: w.name, shipPoint: w.shipPoint, accent: w.accent,
@@ -263,6 +278,8 @@ export default function ShipmentApp() {
           pallets, rolls, euro, american, boxes,
           weight: weight === null ? Math.round(fallbackWeight * 100) / 100 : Math.round(weight * 100) / 100,
           total,
+          unloadSec,
+          group: GROUP_BY_WAREHOUSE[w.id] || "",
         });
       });
     });
@@ -622,7 +639,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
             </h2>
             <p className="text-xs text-stone-400 mt-0.5">
               Итого: паллеты + роллкейджи × {COEFFICIENT} (Садыгалиева-сыпучка — евро + американцы × {EURO_AMERICAN_COEF}; Заморозка/Хлебзавод/ККЦП — паллеты + коробки по ступеням 20/40) ·
-              разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку (фиксировано) ·
+              разгрузка: {PALLET_UNLOAD_SEC} с/паллету ({`Садыгалиева-сыпучка — 600`}), {POINT_UNLOAD_SEC} с/точку (фиксировано) ·
               вес: Садыгалиева-сыпучка — как указал склад, остальные — паллето-эквивалент × {PALLET_KG} кг
             </p>
           </div>
@@ -706,6 +723,8 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                 <th className="text-left font-semibold px-4 py-3 w-28">Тип кузова</th>
                 <th className="text-left font-semibold px-4 py-3 w-40">Точка старта</th>
                 <th className="text-right font-semibold px-4 py-3">Вместимость, палл.</th>
+                <th className="text-right font-semibold px-4 py-3 w-32">Грузопод-ть, т</th>
+                <th className="text-left font-semibold px-4 py-3 w-24">ГБ</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Погрузка с</th>
                 <th className="text-left font-semibold px-4 py-3 w-36">Готов на завтра</th>
                 <th className="px-4 py-3 w-10" />
@@ -718,7 +737,16 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                     <input type="text" value={v.plate} onChange={(e) => onUpdateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
                   </td>
                   <td className="px-4 py-2">
-                    <input type="text" value={v.carrier} onChange={(e) => onUpdateVehicle(v.id, "carrier", e.target.value)} placeholder="Перевозчик" className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
+                    <select
+                      value={v.carrier}
+                      onChange={(e) => onUpdateVehicle(v.id, "carrier", e.target.value)}
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white"
+                    >
+                      <option value="">— выбрать —</option>
+                      {CARRIER_OPTIONS.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
                   </td>
                   <td className="px-4 py-2">
                     <input
@@ -779,6 +807,22 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                         </>
                       )}
                     </div>
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="numeric" value={v.tons}
+                      onChange={(e) => onUpdateVehicle(v.id, "tons", sanitizeQty(e.target.value))}
+                      placeholder="0"
+                      className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400"
+                    />
+                  </td>
+                  <td className="px-4 py-2">
+                    <button
+                      onClick={() => onUpdateVehicle(v.id, "gb", !v.gb)}
+                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors ${v.gb ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
+                    >
+                      {v.gb ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.gb ? "Есть" : "Нет"}
+                    </button>
                   </td>
                   <td className="px-4 py-2">
                     <select
