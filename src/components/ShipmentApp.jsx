@@ -103,11 +103,11 @@ const CARRIER_OPTIONS = ["УмайГрупп", "ТК"];
 
 // товарная группа для выгрузки — по складу
 const GROUP_BY_WAREHOUSE = {
-  prigorodnoe: "сухой",
-  argo: "сухой",
-  pto: "оборудование",
-  sagadalieva: "сыпучка",
-  sagadalieva_zamorozka: "заморозка",
+  prigorodnoe: "Сухой",
+  argo: "Сухой",
+  pto: "Оборудование",
+  sagadalieva: "Сыпучка",
+  sagadalieva_zamorozka: "Заморозка",
   hlebzavod: "СП",
   kkcp: "СП",
 };
