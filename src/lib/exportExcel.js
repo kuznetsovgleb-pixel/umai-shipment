@@ -36,7 +36,7 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
     "ExtID", "Госномер", "Наименование перевозчика", "Готовность", "Тип кузова", "Паллетовместимость, шт",
     "Фактическая грузоподъемность, т", "Собственный", "Vip", "Приоритетные зоны доставки", "Скиллы",
     "Время погрузки ТС, с", "Время погрузки ТС, по", "Наименование точки старта",
-    "Водитель (Фамилия)", "Водитель (Имя)",
+    "Водитель (Фамилия)", "Водитель (Имя)", "Максимальное количество точек доставки",
   ];
   const vehiclesRows = vehicles.map((v) => {
     // собственный транспорт (не ТК) имеет приоритет над наёмным
@@ -48,7 +48,7 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
     return [
       extId, v.plate, v.carrier, v.ready ? 1 : 0, v.bodyType || "", v.pallets || "",
       v.tons || "", isOwn ? 1 : 0, isOwn ? 1 : 0, isOwn ? "Бишкек_город" : "Бишкек_пригород", skills || "",
-      v.from || "", v.to || "", v.start || "", v.driverLastName || "", v.driverFirstName || "",
+      v.from || "", v.to || "", v.start || "", v.driverLastName || "", v.driverFirstName || "", v.maxPoints || "",
     ];
   });
 
