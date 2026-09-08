@@ -19,6 +19,7 @@ export const seedVehiclesForDay = () =>
     to: v.to,
     start: v.start || "",
     bodyType: v.bodyType || "",
+    gb: Boolean(v.gb),
     custom: false,
     ready: false,
   }));
