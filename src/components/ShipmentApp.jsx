@@ -239,7 +239,7 @@ export default function ShipmentApp() {
   const addVehicle = () =>
     patchVehicles((vs) => [
       ...vs,
-      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "", driverLastName: "", driverFirstName: "", pallets: "", tons: "", skills: "", from: "08:00", to: "19:00", start: "", bodyType: "", gb: false, custom: true, ready: false },
+      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "", driverLastName: "", driverFirstName: "", pallets: "", tons: "", skills: "", from: "08:00", to: "19:00", start: "", bodyType: "", gb: false, maxPoints: "", custom: true, ready: false },
     ]);
   const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
@@ -725,6 +725,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                 <th className="text-right font-semibold px-4 py-3">Вместимость, палл.</th>
                 <th className="text-right font-semibold px-4 py-3 w-32">Грузопод-ть, т</th>
                 <th className="text-left font-semibold px-4 py-3 w-24">ГБ</th>
+                <th className="text-right font-semibold px-4 py-3 w-28">Точек доставки</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Погрузка с</th>
                 <th className="text-left font-semibold px-4 py-3 w-36">Готов на завтра</th>
                 <th className="px-4 py-3 w-10" />
@@ -823,6 +824,14 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                     >
                       {v.gb ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.gb ? "Есть" : "Нет"}
                     </button>
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="numeric" value={v.maxPoints}
+                      onChange={(e) => onUpdateVehicle(v.id, "maxPoints", sanitizeQty(e.target.value))}
+                      placeholder="0"
+                      className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400"
+                    />
                   </td>
                   <td className="px-4 py-2">
                     <select
