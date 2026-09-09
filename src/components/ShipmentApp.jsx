@@ -95,11 +95,10 @@ const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozk
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
 
-// точки старта для собственных ТС (у ТК точки старта нет — поле неактивно)
+// точки старта для собственных ТС
 const START_POINT_OPTIONS = ["Центральный офис", "РЦ Пригородное", "РЦ Жашылча", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка", "РЦ РМ и ПТО"];
 
-// перевозчик — теперь фиксированный список, а не свободный текст
-const CARRIER_OPTIONS = ["УмайГрупп", "ТК"];
+// ТК больше не используется — весь транспорт свой
 
 // товарная группа для выгрузки — по складу
 const GROUP_BY_WAREHOUSE = {
@@ -239,7 +238,7 @@ export default function ShipmentApp() {
   const addVehicle = () =>
     patchVehicles((vs) => [
       ...vs,
-      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "", driverLastName: "", driverFirstName: "", pallets: "", tons: "", skills: "", from: "08:00", to: "19:00", start: "", bodyType: "", gb: false, maxPoints: "", custom: true, ready: false },
+      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "УмайГрупп", driverLastName: "", driverFirstName: "", pallets: "", tons: "", skills: "", from: "08:00", to: "19:00", start: "", bodyType: "РЕФ", gb: false, maxPoints: "", custom: true, ready: false },
     ]);
   const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
@@ -290,8 +289,6 @@ export default function ShipmentApp() {
     if (consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
     const readyCount = (day.vehicles || []).filter((v) => v.ready).length;
     if (readyCount === 0) return showToast("Сначала проставьте готовность хотя бы одного ТС на вкладке «Транспорт»");
-    const missingStart = (day.vehicles || []).some((v) => v.ready && v.carrier !== "ТК" && !v.start);
-    if (missingStart) return showToast("У готового собственного ТС не указана точка старта — заполните перед выгрузкой");
     downloadWorkbook(date, consolidated, day.vehicles);
     showToast("Файл сформирован и скачан");
   };
@@ -713,56 +710,32 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
           <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">Транспорт на {dateLabel}</h2>
           <span className="text-xs text-stone-400">Список преднастроен из мастер-файла ТМС · готовность подтверждается каждый день заново</span>
         </div>
-        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm min-w-[900px]">
             <thead>
               <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
-                <th className="text-left font-semibold px-4 py-3">Госномер</th>
-                <th className="text-left font-semibold px-4 py-3">Перевозчик</th>
-                <th className="text-left font-semibold px-4 py-3 w-28">Тип кузова</th>
-                <th className="text-left font-semibold px-4 py-3 w-40">Точка старта</th>
-                <th className="text-right font-semibold px-4 py-3">Вместимость, палл.</th>
+                <th className="text-left font-semibold px-4 py-3 w-32">Госномер</th>
+                <th className="text-left font-semibold px-4 py-3 w-44">Точка старта</th>
+                <th className="text-right font-semibold px-4 py-3 w-28">Вместимость, палл.</th>
                 <th className="text-right font-semibold px-4 py-3 w-32">Грузопод-ть, т</th>
                 <th className="text-left font-semibold px-4 py-3 w-24">ГБ</th>
-                <th className="text-right font-semibold px-4 py-3 w-28">Точек доставки</th>
+                <th className="text-right font-semibold px-4 py-3 w-32">Точек доставки</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Погрузка с</th>
                 <th className="text-left font-semibold px-4 py-3 w-36">Готов на завтра</th>
                 <th className="px-4 py-3 w-10" />
               </tr>
             </thead>
             <tbody>
-              {(day.vehicles || []).map((v) => (
+              {(day.vehicles || []).filter((v) => v.carrier !== "ТК").map((v) => (
                 <tr key={v.id} className="border-t border-stone-100">
                   <td className="px-4 py-2">
                     <input type="text" value={v.plate} onChange={(e) => onUpdateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
                   </td>
                   <td className="px-4 py-2">
                     <select
-                      value={v.carrier}
-                      onChange={(e) => onUpdateVehicle(v.id, "carrier", e.target.value)}
-                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white"
-                    >
-                      <option value="">— выбрать —</option>
-                      {CARRIER_OPTIONS.map((c) => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="text"
-                      value={v.bodyType || ""}
-                      onChange={(e) => onUpdateVehicle(v.id, "bodyType", e.target.value)}
-                      placeholder="напр. РЕФ"
-                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400"
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <select
-                      disabled={v.carrier === "ТК"}
                       value={v.start || ""}
                       onChange={(e) => onUpdateVehicle(v.id, "start", e.target.value)}
-                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white"
                     >
                       <option value="">— выбрать точку —</option>
                       {START_POINT_OPTIONS.map((s) => (
