@@ -32,11 +32,11 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
     r.group || "",
   ]);
 
-  const vehiclesHeader = [
+   const vehiclesHeader = [
     "ExtID", "Госномер", "Наименование перевозчика", "Готовность", "Тип кузова", "Паллетовместимость, шт",
     "Фактическая грузоподъемность, т", "Собственный", "Vip", "Приоритетные зоны доставки", "Скиллы",
     "Время погрузки ТС, с", "Время погрузки ТС, по", "Наименование точки старта",
-    "Водитель (Фамилия)", "Водитель (Имя)", "Максимальное количество точек доставки",
+    "Максимальное количество точек доставки",
   ];
   const vehiclesRows = vehicles.map((v) => {
     // собственный транспорт (не ТК) имеет приоритет над наёмным
@@ -48,21 +48,8 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
     return [
       extId, v.plate, v.carrier, v.ready ? 1 : 0, v.bodyType || "", v.pallets || "",
       v.tons || "", isOwn ? 1 : 0, isOwn ? 1 : 0, isOwn ? "Бишкек_город" : "Бишкек_пригород", skills || "",
-      v.from || "", v.to || "", v.start || "", v.driverLastName || "", v.driverFirstName || "", v.maxPoints || "",
+      v.from || "", v.to || "", v.start || "", v.maxPoints || "",
     ];
-  });
-
-  // список водителей собирается из фактического списка ТС на эту дату,
-  // а не из статичного справочника — так туда попадают и новые водители
-  const driversHeader = ["Наименование перевозчика", "Фамилия", "Имя"];
-  const seenDrivers = new Set();
-  const driversRows = [];
-  vehicles.forEach((v) => {
-    if (!v.driverLastName) return;
-    const key = `${v.carrier}|${v.driverLastName}|${v.driverFirstName}`;
-    if (seenDrivers.has(key)) return;
-    seenDrivers.add(key);
-    driversRows.push([v.carrier, v.driverLastName, v.driverFirstName || ""]);
   });
 
   const storesHeader = ["Код магазина", "Временное окно приемки (в будни)", "Время на разгрузку, сек (на точку)"];
@@ -71,7 +58,6 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([ordersHeader, ...ordersRows]), "Orders");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([vehiclesHeader, ...vehiclesRows]), "Vehicles");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([driversHeader, ...driversRows]), "Drivers");
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([storesHeader, ...storesRows]), "Магазины");
   return wb;
 }
