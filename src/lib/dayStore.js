@@ -5,7 +5,7 @@ import { VEHICLES_TEMPLATE } from "../data/reference";
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 export const seedVehiclesForDay = () =>
-  VEHICLES_TEMPLATE.map((v) => ({
+    VEHICLES_TEMPLATE.filter((v) => v.carrier !== "ТК").map((v) => ({
     id: uid(),
     extId: v.extId,
     plate: v.plate,
