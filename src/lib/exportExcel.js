@@ -7,10 +7,9 @@ const fmtDateRu = (iso) => {
   return `${d}.${m}.${y}`;
 };
 
-// для новых (вручную добавленных) ТС скиллы собираются автоматически:
-// Доверительная;Недоверительная + тоннаж + ГБ, если проставлено «Есть»
+// скиллы для выгрузки: только тоннаж и ГБ (без Доверительная/Недоверительная)
 const composeSkills = (tons, gb) => {
-  const parts = ["Доверительная", "Недоверительная"];
+  const parts = [];
   if (tons) parts.push(`${tons}Т`);
   if (gb) parts.push("ГБ");
   return parts.join(";");
@@ -32,25 +31,24 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
     r.group || "",
   ]);
 
-   const vehiclesHeader = [
+  const vehiclesHeader = [
     "ExtID", "Госномер", "Наименование перевозчика", "Готовность", "Тип кузова", "Паллетовместимость, шт",
     "Фактическая грузоподъемность, т", "Собственный", "Vip", "Приоритетные зоны доставки", "Скиллы",
     "Время погрузки ТС, с", "Время погрузки ТС, по", "Наименование точки старта",
     "Максимальное количество точек доставки",
   ];
-  const vehiclesRows = vehicles.map((v) => {
-    // собственный транспорт (не ТК) имеет приоритет над наёмным
-    const isOwn = v.carrier !== "ТК";
-    // у вручную добавленных ТС нет отдельного ExtID — дублируем госномер в оба поля
-    const extId = v.extId || v.plate;
-    // у вручную добавленных ТС скиллы собираются из тоннажа и ГБ, у остальных — как в справочнике
-    const skills = v.custom ? composeSkills(v.tons, v.gb) : v.skills;
-    return [
-      extId, v.plate, v.carrier, v.ready ? 1 : 0, v.bodyType || "", v.pallets || "",
-      v.tons || "", isOwn ? 1 : 0, isOwn ? 1 : 0, isOwn ? "Бишкек_город" : "Бишкек_пригород", skills || "",
-      v.from || "", v.to || "", v.start || "", v.maxPoints || "",
-    ];
-  });
+  // ТК больше не участвует в выгрузке — только собственный транспорт
+  const vehiclesRows = vehicles
+    .filter((v) => v.carrier !== "ТК")
+    .map((v) => {
+      const extId = v.extId || v.plate;
+      const skills = composeSkills(v.tons, v.gb);
+      return [
+        extId, v.plate, "УмайГрупп", v.ready ? 1 : 0, "РЕФ", v.pallets || "",
+        v.tons || "", 1, 1, "Бишкек_город", skills || "",
+        v.from || "", v.to || "", v.start || "", v.maxPoints || "",
+      ];
+    });
 
   const storesHeader = ["Код магазина", "Временное окно приемки (в будни)", "Время на разгрузку, сек (на точку)"];
   const storesRows = STORES.map((s) => [s, STORE_WINDOWS[s] || "", POINT_UNLOAD_SEC]);
