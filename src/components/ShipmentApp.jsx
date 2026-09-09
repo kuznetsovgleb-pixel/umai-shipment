@@ -719,7 +719,6 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
               <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
                 <th className="text-left font-semibold px-4 py-3">Госномер</th>
                 <th className="text-left font-semibold px-4 py-3">Перевозчик</th>
-                <th className="text-left font-semibold px-4 py-3">Водитель</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Тип кузова</th>
                 <th className="text-left font-semibold px-4 py-3 w-40">Точка старта</th>
                 <th className="text-right font-semibold px-4 py-3">Вместимость, палл.</th>
@@ -748,19 +747,6 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="text"
-                      value={[v.driverLastName, v.driverFirstName].filter(Boolean).join(" ")}
-                      onChange={(e) => {
-                        const parts = e.target.value.split(" ");
-                        onUpdateVehicle(v.id, "driverLastName", parts[0] || "");
-                        onUpdateVehicle(v.id, "driverFirstName", parts.slice(1).join(" "));
-                      }}
-                      placeholder="ФИО водителя"
-                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400"
-                    />
                   </td>
                   <td className="px-4 py-2">
                     <input
