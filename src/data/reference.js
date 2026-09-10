@@ -508,6 +508,11 @@ export const VEHICLES_TEMPLATE = [
   {"extId": "01KG9698M", "plate": "019698M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Садыгалиева - заморозка", "lastName": "Толонов", "firstName": "Элдияр", "gb": false},
   {"extId": "01KG299BV", "plate": "01299BV", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 7, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Садыгалиева - заморозка", "lastName": "Касымбеков", "firstName": "Султан", "gb": false},
   {"extId": "KGFH3218", "plate": "3218FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 5, "tons": 3, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Садыгалиева - заморозка", "lastName": "Айбек уулу", "firstName": "Азамат", "gb": false},
+  {"extId": "01KG1185M", "plate": "011185M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 9, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null, "gb": false},
+  {"extId": "01KG378BV", "plate": "01378BV", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 7, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null, "gb": true},
+  {"extId": "01KG562BV", "plate": "01562BV", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 7, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null, "gb": true},
+  {"extId": "01KG563BV", "plate": "01563BV", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 7, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null, "gb": true},
+  {"extId": "KGFH3217", "plate": "3217FH", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 6, "tons": 3, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "Центральный офис", "lastName": null, "firstName": null, "gb": true},
 ];
 
 export const WAREHOUSES = [
