@@ -7,16 +7,25 @@ const fmtDateRu = (iso) => {
   return `${d}.${m}.${y}`;
 };
 
-// скиллы для выгрузки: только тоннаж и ГБ (без Доверительная/Недоверительная)
+// компактная дата для суффикса номера заказа: 10092026 (без точек)
+const fmtDateCompact = (iso) => {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}${m}${y}`;
+};
+
+// скиллы для выгрузки: только "5т" (для ТС грузоподъёмностью до 5т включительно)
+// и "ГБ" (если у машины есть гидроборт)
 const composeSkills = (tons, gb) => {
   const parts = [];
-  if (tons) parts.push(`${tons}Т`);
+  if (tons && Number(tons) <= 5) parts.push("5т");
   if (gb) parts.push("ГБ");
   return parts.join(";");
 };
 
 export function buildWorkbook(dateIso, consolidated, vehicles) {
   const dateLabel = fmtDateRu(dateIso);
+  const dateSuffix = fmtDateCompact(dateIso);
 
   const ordersHeader = [
     "Номер заказа *", "Дата доставки*", "Наименование точки отгрузки*", "Наименование точки доставки*",
@@ -25,14 +34,14 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
     "Товарная группа",
   ];
   const ordersRows = consolidated.map((r) => [
-    r.order, dateLabel, r.shipPoint, r.store,
+    `${r.order}_${dateSuffix}`, dateLabel, r.shipPoint, r.store,
     r.total, "Паллета", r.weight,
     r.unloadSec, POINT_UNLOAD_SEC,
     r.group || "",
   ]);
 
   const vehiclesHeader = [
-    "ExtID", "Госномер", "Наименование перевозчика", "Готовность", "Тип кузова", "Паллетовместимость, шт",
+    "Госномер", "Наименование перевозчика", "Готовность", "Тип кузова", "Паллетовместимость, шт",
     "Фактическая грузоподъемность, т", "Собственный", "Vip", "Приоритетные зоны доставки", "Скиллы",
     "Время погрузки ТС, с", "Время погрузки ТС, по", "Наименование точки старта",
     "Максимальное количество точек доставки",
@@ -41,10 +50,9 @@ export function buildWorkbook(dateIso, consolidated, vehicles) {
   const vehiclesRows = vehicles
     .filter((v) => v.carrier !== "ТК")
     .map((v) => {
-      const extId = v.extId || v.plate;
       const skills = composeSkills(v.tons, v.gb);
       return [
-        extId, v.plate, "УмайГрупп", v.ready ? 1 : 0, "РЕФ", v.pallets || "",
+        v.plate, "УмайГрупп", v.ready ? 1 : 0, "РЕФ", v.pallets || "",
         v.tons || "", 1, 1, "Бишкек_город", skills || "",
         v.from || "", v.to || "", v.start || "", v.maxPoints || "",
       ];
