@@ -729,7 +729,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
               {(day.vehicles || []).filter((v) => v.carrier !== "ТК").map((v) => (
                 <tr key={v.id} className="border-t border-stone-100">
                   <td className="px-4 py-2">
-                    <input type="text" value={v.plate} onChange={(e) => onUpdateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
+                 <input type="text" disabled={!v.custom} value={v.plate} onChange={(e) => onUpdateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
                   </td>
                   <td className="px-4 py-2">
                     <select
