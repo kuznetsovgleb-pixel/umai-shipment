@@ -20,6 +20,7 @@ const ACCENT = {
   violet: { text: "text-violet-700", bg: "bg-violet-600", dot: "bg-violet-500" },
   cyan: { text: "text-cyan-700", bg: "bg-cyan-600", dot: "bg-cyan-500" },
   teal: { text: "text-teal-700", bg: "bg-teal-600", dot: "bg-teal-500" },
+  lime: { text: "text-lime-700", bg: "bg-lime-600", dot: "bg-lime-500" },
 };
 
 const todayISO = () => {
@@ -108,8 +109,7 @@ const findDuplicateStores = (rows) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "murmanskoe", "zhashylcha", "otl"];
-
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "otl"];
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
 
