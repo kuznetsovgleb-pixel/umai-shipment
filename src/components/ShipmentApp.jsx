@@ -6,7 +6,7 @@ import {
 import { WAREHOUSES, STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
-  subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles,
+  subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
 } from "../lib/dayStore";
 import { downloadWorkbook, downloadZhashylchaWorkbook } from "../lib/exportExcel";
 
@@ -131,11 +131,16 @@ export default function ShipmentApp() {
   const [toast, setToast] = useState(null);
   const [activeTab, setActiveTab] = useState("prigorodnoe");
 
+  // подписка в реальном времени — если склад или ОТЛ поменяли что-то,
+  // все остальные видят это без перезагрузки
   useEffect(() => {
     setLoadingDay(true);
     const unsub = subscribeToDay(
       date,
       (data) => {
+        // самовосстановление: если список машин пуст (например, поле
+        // случайно удалили в консоли Firestore) — подставляем свежий
+        // список из справочника и сразу сохраняем его обратно
         if (!data.vehicles || data.vehicles.length === 0) {
           const seeded = seedVehiclesForDay();
           setDay({ ...data, vehicles: seeded });
@@ -167,6 +172,7 @@ export default function ShipmentApp() {
     return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
   }, [day]);
 
+  // ---- склад: строки заказов (debounce перед записью в Firestore) ----
   const saveTimer = useRef(null);
   const patchWarehouseRows = useCallback(
     (whId, updater) => {
@@ -228,6 +234,7 @@ export default function ShipmentApp() {
   };
   const unlockWarehouse = (whId) => setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
+  // ---- ОТЛ: транспорт ----
   const patchVehicles = useCallback(
     (updater) => {
       setDay((current) => {
@@ -345,7 +352,7 @@ export default function ShipmentApp() {
                 }`}
               >
                 {isOtl ? <Truck size={14} /> : isZh ? <Moon size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
-                {isZh ? "Жашылча (ночь)" : tabLabel(id)}
+                {isZh ? ZH_DISPLAY_NAME : tabLabel(id)}
                 {sub && <Lock size={12} className="text-stone-400" />}
                 {active && <span className={`absolute left-0 right-0 -bottom-px h-0.5 ${isOtl ? "bg-stone-800" : a.bg}`} />}
               </button>
@@ -845,6 +852,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
 
 const ZH_SHIP_POINT = "РЦ Жашылча";
 const ZH_GROUP = "Охлажденка";
+const ZH_DISPLAY_NAME = "РЦ Жашылча - молочка (ночь)";
 const ZH_START_OPTIONS = ["РЦ Жашылча", "Центральный офис", "РЦ Пригородное", "РЦ Ак-Орго", "РЦ РМ и ПТО", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка"];
 
 function ZhashylchaPanel() {
@@ -864,7 +872,15 @@ function ZhashylchaPanel() {
     const unsub = subscribeToZhashylchaDay(
       zhDate,
       (data) => {
-        setZhDay(data);
+        // самовосстановление: если список машин пуст — подставляем свежий
+        // список из справочника Жашылча и сразу сохраняем его обратно
+        if (!data.vehicles || data.vehicles.length === 0) {
+          const seeded = seedZhashylchaVehicles();
+          setZhDay({ ...data, vehicles: seeded });
+          saveZhashylchaVehicles(zhDate, seeded).catch(() => {});
+        } else {
+          setZhDay(data);
+        }
         setZhLoading(false);
       },
       () => setZhLoading(false)
@@ -933,7 +949,7 @@ function ZhashylchaPanel() {
 
     try {
       await setZhashylchaSubmitted(zhDate, true);
-      showToast("Жашылча (ночь): данные отправлены в транспортный отдел");
+      showToast(`${ZH_DISPLAY_NAME}: данные отправлены в транспортный отдел`);
     } catch {
       showToast("Не удалось отправить — проверьте связь и попробуйте снова");
     }
@@ -1006,11 +1022,12 @@ function ZhashylchaPanel() {
         Отдельный контур: свой список заказов, свои ТС и своя выгрузка — не пересекается с остальными складами. Всегда дата «сегодня» ({dateLabel}), заказы подаются день в день.
       </div>
 
+      {/* ---- блок склада: ввод заказов ---- */}
       <div>
         <div className="flex items-center justify-between mb-4">
           <div>
             <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-cyan-700 mb-1">
-              <span className="h-2 w-2 rounded-full bg-cyan-500" /> Склад · Жашылча (ночь, охлажденка)
+              <span className="h-2 w-2 rounded-full bg-cyan-500" /> Склад · {ZH_DISPLAY_NAME}
             </div>
             <p className="text-sm text-stone-500">
               Заказ №, количество евро- и американских паллет (шаг 0,5), вес на {dateLabel}. Магазин выбирается из списка.
@@ -1130,11 +1147,12 @@ function ZhashylchaPanel() {
         )}
       </div>
 
+      {/* ---- блок ОТЛ: консолидация + машины + выгрузка ---- */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
-              Для ОТЛ · Жашылча — {dateLabel} · {consolidated.length} заказ(ов)
+              Для ОТЛ · {ZH_DISPLAY_NAME} — {dateLabel} · {consolidated.length} заказ(ов)
             </h2>
             <p className="text-xs text-stone-400 mt-0.5">
               Итого = евро + американцы × {EURO_AMERICAN_COEF} · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · товарная группа: {ZH_GROUP}
@@ -1180,7 +1198,7 @@ function ZhashylchaPanel() {
           </table>
         </div>
 
-        <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-3">Транспорт (Жашылча)</h3>
+        <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-3">Транспорт ({ZH_DISPLAY_NAME})</h3>
         <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
           <table className="w-full text-sm min-w-[880px]">
             <thead>
