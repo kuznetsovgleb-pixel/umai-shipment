@@ -1,11 +1,14 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   Plus, Trash2, Send, Download, Truck, CheckCircle2, Circle, AlertTriangle,
-  Lock, Pencil, Check, Loader2, Wifi, Users,
+  Lock, Pencil, Check, Loader2, Wifi, Users, Moon,
 } from "lucide-react";
 import { WAREHOUSES, STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
-import { subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles } from "../lib/dayStore";
-import { downloadWorkbook } from "../lib/exportExcel";
+import {
+  subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
+  subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles,
+} from "../lib/dayStore";
+import { downloadWorkbook, downloadZhashylchaWorkbook } from "../lib/exportExcel";
 
 const ACCENT = {
   emerald: { text: "text-emerald-700", bg: "bg-emerald-600", dot: "bg-emerald-500" },
@@ -15,6 +18,7 @@ const ACCENT = {
   rose: { text: "text-rose-700", bg: "bg-rose-600", dot: "bg-rose-500" },
   amber: { text: "text-amber-700", bg: "bg-amber-600", dot: "bg-amber-500" },
   violet: { text: "text-violet-700", bg: "bg-violet-600", dot: "bg-violet-500" },
+  cyan: { text: "text-cyan-700", bg: "bg-cyan-600", dot: "bg-cyan-500" },
 };
 
 const todayISO = () => {
@@ -46,6 +50,14 @@ const sanitizeWeight = (raw) => {
   const parts = v.split(".");
   if (parts.length > 2) v = parts[0] + "." + parts.slice(1).join("");
   return v;
+};
+
+// паллеты с шагом 0.5 (только для Жашылча — евро/американцы могут быть дробными)
+const sanitizeHalfStep = (raw) => {
+  if (raw === "") return "";
+  const num = parseFloat(raw.replace(",", "."));
+  if (isNaN(num) || num < 0) return "";
+  return String(Math.round(num * 2) / 2);
 };
 
 // коэффициенты веса для складов без ручного ввода (кг за паллето-эквивалент)
@@ -90,14 +102,15 @@ const findDuplicateStores = (rows) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "zhashylcha", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
 
-// точки старта для собственных ТС
+// точки старта для собственных ТС (у ТК точки старта нет — поле неактивно)
 const START_POINT_OPTIONS = ["Центральный офис", "РЦ Пригородное", "РЦ Жашылча", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка", "РЦ РМ и ПТО"];
 
+// перевозчик — теперь фиксированный список, а не свободный текст
 // ТК больше не используется — весь транспорт свой
 
 // товарная группа для выгрузки — по складу
@@ -118,16 +131,11 @@ export default function ShipmentApp() {
   const [toast, setToast] = useState(null);
   const [activeTab, setActiveTab] = useState("prigorodnoe");
 
-  // подписка в реальном времени — если склад или ОТЛ поменяли что-то,
-  // все остальные видят это без перезагрузки
   useEffect(() => {
     setLoadingDay(true);
     const unsub = subscribeToDay(
       date,
       (data) => {
-        // самовосстановление: если список машин пуст (например, поле
-        // случайно удалили в консоли Firestore) — подставляем свежий
-        // список из справочника и сразу сохраняем его обратно
         if (!data.vehicles || data.vehicles.length === 0) {
           const seeded = seedVehiclesForDay();
           setDay({ ...data, vehicles: seeded });
@@ -159,7 +167,6 @@ export default function ShipmentApp() {
     return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
   }, [day]);
 
-  // ---- склад: строки заказов (debounce перед записью в Firestore) ----
   const saveTimer = useRef(null);
   const patchWarehouseRows = useCallback(
     (whId, updater) => {
@@ -221,7 +228,6 @@ export default function ShipmentApp() {
   };
   const unlockWarehouse = (whId) => setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
-  // ---- ОТЛ: транспорт ----
   const patchVehicles = useCallback(
     (updater) => {
       setDay((current) => {
@@ -287,7 +293,7 @@ export default function ShipmentApp() {
 
   const exportExcel = () => {
     if (consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
-    const readyCount = (day.vehicles || []).filter((v) => v.ready).length;
+    const readyCount = (day.vehicles || []).filter((v) => v.ready && v.carrier !== "ТК").length;
     if (readyCount === 0) return showToast("Сначала проставьте готовность хотя бы одного ТС на вкладке «Транспорт»");
     downloadWorkbook(date, consolidated, day.vehicles);
     showToast("Файл сформирован и скачан");
@@ -325,10 +331,11 @@ export default function ShipmentApp() {
         <div className="max-w-6xl mx-auto px-6 flex items-end gap-1 flex-wrap">
           {TABS.map((id) => {
             const isOtl = id === "otl";
-            const w = WAREHOUSES.find((x) => x.id === id);
-            const a = w ? ACCENT[w.accent] : null;
+            const isZh = id === "zhashylcha";
+            const w = !isOtl && !isZh ? WAREHOUSES.find((x) => x.id === id) : null;
+            const a = w ? ACCENT[w.accent] : isZh ? ACCENT.cyan : null;
             const active = activeTab === id;
-            const sub = !isOtl && day[`submitted_${id}`];
+            const sub = !isOtl && !isZh && day[`submitted_${id}`];
             return (
               <button
                 key={id}
@@ -337,8 +344,8 @@ export default function ShipmentApp() {
                   active ? "bg-stone-50 text-stone-900" : "text-stone-500 hover:text-stone-700"
                 }`}
               >
-                {isOtl ? <Truck size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
-                {tabLabel(id)}
+                {isOtl ? <Truck size={14} /> : isZh ? <Moon size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
+                {isZh ? "Жашылча (ночь)" : tabLabel(id)}
                 {sub && <Lock size={12} className="text-stone-400" />}
                 {active && <span className={`absolute left-0 right-0 -bottom-px h-0.5 ${isOtl ? "bg-stone-800" : a.bg}`} />}
               </button>
@@ -348,7 +355,9 @@ export default function ShipmentApp() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6">
-        {loadingDay ? (
+        {activeTab === "zhashylcha" ? (
+          <ZhashylchaPanel />
+        ) : loadingDay ? (
           <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
             <Loader2 size={16} className="animate-spin" /> Загрузка данных за {fmtDateRu(date)}…
           </div>
@@ -729,7 +738,7 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
               {(day.vehicles || []).filter((v) => v.carrier !== "ТК").map((v) => (
                 <tr key={v.id} className="border-t border-stone-100">
                   <td className="px-4 py-2">
-                 <input type="text" disabled={!v.custom} value={v.plate} onChange={(e) => onUpdateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
+                    <input type="text" disabled={!v.custom} value={v.plate} onChange={(e) => onUpdateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
                   </td>
                   <td className="px-4 py-2">
                     <select
@@ -825,6 +834,442 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Жашылча (ночь) — полностью отдельный контур: свой склад, свой список ТС,
+// своя выгрузка, всегда на сегодняшнюю дату (заказы подаются день в день)
+// ---------------------------------------------------------------------------
+
+const ZH_SHIP_POINT = "РЦ Жашылча";
+const ZH_GROUP = "Охлажденка";
+const ZH_START_OPTIONS = ["РЦ Жашылча", "Центральный офис", "РЦ Пригородное", "РЦ Ак-Орго", "РЦ РМ и ПТО", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка"];
+
+function ZhashylchaPanel() {
+  const zhDate = useMemo(() => todayISO(), []);
+  const [zhDay, setZhDay] = useState({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
+  const [zhLoading, setZhLoading] = useState(true);
+  const [toast, setToast] = useState(null);
+  const saveTimer = useRef(null);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2800);
+  };
+
+  useEffect(() => {
+    setZhLoading(true);
+    const unsub = subscribeToZhashylchaDay(
+      zhDate,
+      (data) => {
+        setZhDay(data);
+        setZhLoading(false);
+      },
+      () => setZhLoading(false)
+    );
+    return unsub;
+  }, [zhDate]);
+
+  const rows = zhDay.rows || [];
+
+  const duplicateOrders = useMemo(() => {
+    const counts = {};
+    rows.forEach((r) => {
+      const key = r.order.trim().toLowerCase();
+      if (!key) return;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
+  }, [rows]);
+  const duplicateStores = useMemo(() => findDuplicateStores(rows), [rows]);
+
+  const patchRows = useCallback(
+    (updater) => {
+      setZhDay((current) => {
+        const nextRows = updater(current.rows || []);
+        const next = { ...current, rows: nextRows };
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => {
+          saveZhashylchaRows(zhDate, nextRows).catch(() => showToast("Не удалось сохранить — проверьте связь"));
+        }, 500);
+        return next;
+      });
+    },
+    [zhDate]
+  );
+
+  const updateRow = (rowId, field, value) => {
+    patchRows((rs) =>
+      rs.map((r) => {
+        if (r.id !== rowId) return r;
+        let v = value;
+        if (field === "euro" || field === "american") v = sanitizeHalfStep(value);
+        if (field === "weight") v = sanitizeWeight(value);
+        return { ...r, [field]: v };
+      })
+    );
+  };
+  const addRow = () => patchRows((rs) => [...rs, makeEmptyRow()]);
+  const removeRow = (rowId) => patchRows((rs) => (rs.length > 1 ? rs.filter((r) => r.id !== rowId) : rs));
+
+  const submitZh = async () => {
+    const filled = rows.filter((r) => rowIssues(r, true, "euroAmerican").hasData);
+    if (filled.length === 0) return showToast("Нет заполненных строк для отправки");
+    const incompleteCount = filled.filter((r) => rowIssues(r, true, "euroAmerican").incomplete).length;
+    if (incompleteCount > 0) {
+      return showToast(
+        incompleteCount === 1
+          ? "Одна строка заполнена не полностью — проверьте подсвеченные поля"
+          : `${incompleteCount} строк заполнены не полностью — проверьте подсвеченные поля`
+      );
+    }
+    const hasDupe = filled.some((r) => duplicateOrders.has(r.order.trim().toLowerCase()));
+    if (hasDupe) return showToast("Есть повторяющиеся номера заказов — исправьте перед отправкой");
+    const dupStores = findDuplicateStores(filled);
+    const hasDupeStore = filled.some((r) => dupStores.has(r.store.trim().toLowerCase()));
+    if (hasDupeStore) return showToast("На один магазин может быть только один заказ — исправьте повторяющиеся магазины");
+
+    try {
+      await setZhashylchaSubmitted(zhDate, true);
+      showToast("Жашылча (ночь): данные отправлены в транспортный отдел");
+    } catch {
+      showToast("Не удалось отправить — проверьте связь и попробуйте снова");
+    }
+  };
+  const unlockZh = () => setZhashylchaSubmitted(zhDate, false).catch(() => showToast("Не удалось изменить статус"));
+
+  const patchVehicles = useCallback(
+    (updater) => {
+      setZhDay((current) => {
+        const next = { ...current, vehicles: updater(current.vehicles || []) };
+        if (saveTimer.current) clearTimeout(saveTimer.current);
+        saveTimer.current = setTimeout(() => {
+          saveZhashylchaVehicles(zhDate, next.vehicles).catch(() => showToast("Не удалось сохранить — проверьте связь"));
+        }, 500);
+        return next;
+      });
+    },
+    [zhDate]
+  );
+  const addVehicle = () =>
+    patchVehicles((vs) => [
+      ...vs,
+      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "УмайГрупп", pallets: "", tons: "", skills: "", from: "09:00", to: "19:00", start: ZH_SHIP_POINT, bodyType: "РЕФ", gb: false, maxPoints: "", custom: true, ready: false },
+    ]);
+  const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
+  const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
+
+  const consolidated = useMemo(() => {
+    if (!zhDay.submitted) return [];
+    return rows
+      .filter((r) => r.order.trim())
+      .map((r) => {
+        const euro = parseFloat(r.euro) || 0;
+        const american = parseFloat(r.american) || 0;
+        const weight = parseFloat(r.weight) || 0;
+        return {
+          id: r.id, order: r.order.trim(), store: r.store || "—",
+          euro, american,
+          total: Math.round((euro + american * EURO_AMERICAN_COEF) * 100) / 100,
+          weight: Math.round(weight * 100) / 100,
+          shipPoint: ZH_SHIP_POINT,
+          unloadSec: PALLET_UNLOAD_SEC,
+          group: ZH_GROUP,
+        };
+      });
+  }, [zhDay.submitted, rows]);
+
+  const exportZh = () => {
+    if (consolidated.length === 0) return showToast("Нет данных для выгрузки — сначала отправьте заказы");
+    const readyCount = (zhDay.vehicles || []).length && (zhDay.vehicles || []).filter((v) => v.ready).length;
+    if (!readyCount) return showToast("Сначала проставьте готовность хотя бы одного ТС");
+    downloadZhashylchaWorkbook(zhDate, consolidated, zhDay.vehicles || []);
+    showToast("Файл сформирован и скачан");
+  };
+
+  const dateLabel = fmtDateRu(zhDate);
+
+  if (zhLoading) {
+    return (
+      <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
+        <Loader2 size={16} className="animate-spin" /> Загрузка данных за {dateLabel}…
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-8">
+      <div className="bg-cyan-50 border border-cyan-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-cyan-800">
+        <Moon size={14} />
+        Отдельный контур: свой список заказов, свои ТС и своя выгрузка — не пересекается с остальными складами. Всегда дата «сегодня» ({dateLabel}), заказы подаются день в день.
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-cyan-700 mb-1">
+              <span className="h-2 w-2 rounded-full bg-cyan-500" /> Склад · Жашылча (ночь, охлажденка)
+            </div>
+            <p className="text-sm text-stone-500">
+              Заказ №, количество евро- и американских паллет (шаг 0,5), вес на {dateLabel}. Магазин выбирается из списка.
+            </p>
+          </div>
+        </div>
+
+        {zhDay.submitted && (
+          <div className="mb-4 flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
+            <div className="flex items-center gap-2 text-sm text-stone-700">
+              <Lock size={15} className="text-stone-500" /> Данные за {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
+            </div>
+            <button onClick={unlockZh} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900 whitespace-nowrap">
+              Вернуть на редактирование
+            </button>
+          </div>
+        )}
+
+        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+                <th className="text-left font-semibold px-4 py-3 w-10">#</th>
+                <th className="text-left font-semibold px-4 py-3 w-40">Заказ №</th>
+                <th className="text-left font-semibold px-4 py-3">Магазин</th>
+                <th className="text-left font-semibold px-4 py-3 w-28">Евро</th>
+                <th className="text-left font-semibold px-4 py-3 w-28">Американцы</th>
+                <th className="text-left font-semibold px-4 py-3 w-28">Вес, кг</th>
+                <th className="px-4 py-3 w-10" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
+                const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
+                const issues = rowIssues(r, true, "euroAmerican");
+                const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
+                const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
+                return (
+                  <tr key={r.id} className="border-t border-stone-100 align-top">
+                    <td className="px-4 py-2 text-stone-400 font-mono text-xs pt-2.5">{i + 1}</td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="text" disabled={zhDay.submitted} value={r.order}
+                        onChange={(e) => updateRow(r.id, "order", e.target.value)}
+                        placeholder="напр. 100234"
+                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${isDupe || issues.missingOrder ? errBorder : okBorder}`}
+                      />
+                      {isDupe && <div className="text-xs text-rose-600 mt-1">Номер дублируется</div>}
+                      {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
+                    </td>
+                    <td className="px-4 py-2">
+                      <select
+                        disabled={zhDay.submitted} value={r.store}
+                        onChange={(e) => updateRow(r.id, "store", e.target.value)}
+                        className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingStore || isDupeStore ? errBorder : okBorder}`}
+                      >
+                        <option value="">— выбрать магазин —</option>
+                        {STORES.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
+                      {!issues.missingStore && isDupeStore && <div className="text-xs text-rose-600 mt-1">На этот магазин уже есть заказ — проверьте дубли</div>}
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="text" inputMode="decimal" disabled={zhDay.submitted} value={r.euro}
+                        onChange={(e) => updateRow(r.id, "euro", e.target.value)}
+                        placeholder="0"
+                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                      />
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="text" inputMode="decimal" disabled={zhDay.submitted} value={r.american}
+                        onChange={(e) => updateRow(r.id, "american", e.target.value)}
+                        placeholder="0"
+                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                      />
+                      {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите евро или американец</div>}
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="text" inputMode="decimal" disabled={zhDay.submitted} value={r.weight}
+                        onChange={(e) => updateRow(r.id, "weight", e.target.value)}
+                        placeholder="0"
+                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingWeight ? errBorder : okBorder}`}
+                      />
+                      {issues.missingWeight && <div className="text-xs text-rose-600 mt-1">Укажите вес</div>}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      {!zhDay.submitted && (
+                        <button onClick={() => removeRow(r.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {!zhDay.submitted && (
+            <button onClick={addRow} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
+              <Plus size={15} /> Добавить заказ
+            </button>
+          )}
+        </div>
+
+        {!zhDay.submitted && (
+          <div className="flex justify-end mt-4">
+            <button onClick={submitZh} className="flex items-center gap-2 bg-cyan-600 text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:opacity-90 transition-opacity shadow-sm">
+              <Send size={15} /> Отправить в транспортный отдел
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+              Для ОТЛ · Жашылча — {dateLabel} · {consolidated.length} заказ(ов)
+            </h2>
+            <p className="text-xs text-stone-400 mt-0.5">
+              Итого = евро + американцы × {EURO_AMERICAN_COEF} · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · товарная группа: {ZH_GROUP}
+            </p>
+          </div>
+          <button onClick={exportZh} className="flex items-center gap-2 bg-stone-900 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-stone-700 transition-colors">
+            <Download size={15} /> Скачать в Excel
+          </button>
+        </div>
+
+        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden mb-6">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+                <th className="text-left font-semibold px-4 py-3">Заказ №</th>
+                <th className="text-left font-semibold px-4 py-3">Магазин</th>
+                <th className="text-right font-semibold px-4 py-3">Евро</th>
+                <th className="text-right font-semibold px-4 py-3">Американцы</th>
+                <th className="text-right font-semibold px-4 py-3">Итого</th>
+                <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
+              </tr>
+            </thead>
+            <tbody>
+              {consolidated.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-stone-400">
+                    Пока нет отправленных данных. Ждём кнопку «Отправить в транспортный отдел» выше.
+                  </td>
+                </tr>
+              ) : (
+                consolidated.map((r) => (
+                  <tr key={r.id} className="border-t border-stone-100">
+                    <td className="px-4 py-2 font-mono">{r.order}</td>
+                    <td className="px-4 py-2 text-stone-700">{r.store}</td>
+                    <td className="px-4 py-2 text-right font-mono text-stone-600">{r.euro}</td>
+                    <td className="px-4 py-2 text-right font-mono text-stone-600">{r.american}</td>
+                    <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{r.total}</td>
+                    <td className="px-4 py-2 text-right font-mono text-stone-600">{r.weight}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-3">Транспорт (Жашылча)</h3>
+        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+          <table className="w-full text-sm min-w-[880px]">
+            <thead>
+              <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+                <th className="text-left font-semibold px-4 py-3 w-32">Госномер</th>
+                <th className="text-left font-semibold px-4 py-3 w-44">Точка старта</th>
+                <th className="text-right font-semibold px-4 py-3 w-24">Вместим., палл.</th>
+                <th className="text-right font-semibold px-4 py-3 w-24">Грузопод-ть, т</th>
+                <th className="text-left font-semibold px-4 py-3 w-24">ГБ</th>
+                <th className="text-right font-semibold px-4 py-3 w-24">Точек доставки</th>
+                <th className="text-left font-semibold px-4 py-3 w-24">Погрузка с</th>
+                <th className="text-left font-semibold px-4 py-3 w-32">Готов на завтра</th>
+                <th className="px-4 py-3 w-10" />
+              </tr>
+            </thead>
+            <tbody>
+              {(zhDay.vehicles || []).map((v) => (
+                <tr key={v.id} className="border-t border-stone-100">
+                  <td className="px-4 py-2">
+                    <input type="text" disabled={!v.custom} value={v.plate} onChange={(e) => updateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
+                  </td>
+                  <td className="px-4 py-2">
+                    <select
+                      value={v.start || ""}
+                      onChange={(e) => updateVehicle(v.id, "start", e.target.value)}
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white"
+                    >
+                      <option value="">— выбрать точку —</option>
+                      {ZH_START_OPTIONS.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-2">
+                    <input type="text" inputMode="numeric" value={v.pallets} onChange={(e) => updateVehicle(v.id, "pallets", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input type="text" inputMode="numeric" value={v.tons} onChange={(e) => updateVehicle(v.id, "tons", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
+                  </td>
+                  <td className="px-4 py-2">
+                    <button
+                      onClick={() => updateVehicle(v.id, "gb", !v.gb)}
+                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors ${v.gb ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
+                    >
+                      {v.gb ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.gb ? "Есть" : "Нет"}
+                    </button>
+                  </td>
+                  <td className="px-4 py-2">
+                    <input type="text" inputMode="numeric" value={v.maxPoints} onChange={(e) => updateVehicle(v.id, "maxPoints", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
+                  </td>
+                  <td className="px-4 py-2">
+                    <select
+                      value={v.from || "09:00"}
+                      onChange={(e) => updateVehicle(v.id, "from", e.target.value)}
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white"
+                    >
+                      {LOAD_TIME_OPTIONS.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-2">
+                    <button
+                      onClick={() => updateVehicle(v.id, "ready", !v.ready)}
+                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors ${v.ready ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
+                    >
+                      {v.ready ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.ready ? "Готов" : "Не готов"}
+                    </button>
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    <button onClick={() => removeVehicle(v.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={addVehicle} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
+            <Plus size={15} /> Добавить ТС
+          </button>
+        </div>
+      </div>
+
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-stone-900 text-white text-sm font-medium px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
+          <AlertTriangle size={14} className="text-amber-400" /> {toast}
+        </div>
+      )}
     </div>
   );
 }
