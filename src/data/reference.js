@@ -539,6 +539,7 @@ export const WAREHOUSES = [
   { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose", shipPoint: "РЦ Садыгалиева - заморозка", qtyMode: "palletsBoxes" },
   { id: "hlebzavod", name: "Хлебзавод", accent: "amber", shipPoint: "СП Хлебозавод", qtyMode: "palletsBoxes" },
   { id: "kkcp", name: "ККЦП", accent: "violet", shipPoint: "Кондитерское Центральное Производство", qtyMode: "palletsBoxes" },
+  { id: "murmanskoe", name: "Мурманское", accent: "teal", shipPoint: "РЦ Мурманская - основной", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
 ];
 
 // итог на ГМ = паллеты + роллкейджи × коэффициент
