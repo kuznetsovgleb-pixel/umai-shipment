@@ -230,7 +230,8 @@ export const STORES = [
   "SPAR-09 Исанова СП",
   "SPAR-07 Мичурина СП",
   "SPAR-01 ЦГ СП",
-  "SPAR-12 Манаса СП"
+  "SPAR-12 Манаса СП",
+  "Архив"
 ];
 
 export const STORE_WINDOWS = {
@@ -464,7 +465,8 @@ export const STORE_WINDOWS = {
   "SPAR-09 Исанова СП": "09:00-17:20",
   "SPAR-07 Мичурина СП": "09:00-17:20",
   "SPAR-01 ЦГ СП": "09:00-17:20",
-  "SPAR-12 Манаса СП": "09:00-17:20"
+  "SPAR-12 Манаса СП": "09:00-17:20",
+  "Архив" : "09:00-17:20"
 };
 
 export const DRIVERS_REF = [
