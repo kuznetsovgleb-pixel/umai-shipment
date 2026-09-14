@@ -28,7 +28,7 @@ export const seedVehiclesForDay = () =>
 export const makeEmptyRow = () => ({
   id: uid(), order: "", store: "",
   pallets: "", rolls: "", euro: "", american: "", boxes: "",
-  weight: "",
+  weight: "", category: "",
 });
 
 export const emptyDay = () => ({
@@ -39,6 +39,7 @@ export const emptyDay = () => ({
   rows_sagadalieva_zamorozka: [makeEmptyRow()],
   rows_hlebzavod: [makeEmptyRow()],
   rows_kkcp: [makeEmptyRow()],
+  rows_murmanskoe: [makeEmptyRow()],
   submitted_prigorodnoe: false,
   submitted_argo: false,
   submitted_pto: false,
@@ -46,6 +47,7 @@ export const emptyDay = () => ({
   submitted_sagadalieva_zamorozka: false,
   submitted_hlebzavod: false,
   submitted_kkcp: false,
+  submitted_murmanskoe: false,
   vehicles: seedVehiclesForDay(),
 });
 
