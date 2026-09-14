@@ -19,6 +19,7 @@ const ACCENT = {
   amber: { text: "text-amber-700", bg: "bg-amber-600", dot: "bg-amber-500" },
   violet: { text: "text-violet-700", bg: "bg-violet-600", dot: "bg-violet-500" },
   cyan: { text: "text-cyan-700", bg: "bg-cyan-600", dot: "bg-cyan-500" },
+  teal: { text: "text-teal-700", bg: "bg-teal-600", dot: "bg-teal-500" },
 };
 
 const todayISO = () => {
@@ -71,24 +72,29 @@ const EURO_AMERICAN_COEF = 1.2;
 // дальше по той же логике (каждые следующие 20 коробок = ещё +0.5 паллеты)
 const boxesToPallets = (boxes) => (boxes > 0 ? Math.ceil(boxes / 20) * 0.5 : 0);
 
-const rowIssues = (r, requiresWeight = false, qtyMode = "default") => {
+const rowIssues = (r, requiresWeight = false, qtyMode = "default", requiresCategory = false) => {
   const qtyFilled =
     qtyMode === "euroAmerican" ? (r.euro !== "" || r.american !== "") :
     qtyMode === "palletsBoxes" ? (r.pallets !== "" || r.boxes !== "") :
+    qtyMode === "palletsAmericanBoxes" ? (r.pallets !== "" || r.american !== "" || r.boxes !== "") :
     (r.pallets !== "" || r.rolls !== "");
-  const hasData = Boolean(r.order.trim() || r.store || qtyFilled || (r.weight && r.weight !== ""));
+  const hasData = Boolean(r.order.trim() || r.store || qtyFilled || (r.weight && r.weight !== "") || r.category);
   if (!hasData) {
-    return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, missingWeight: false, incomplete: false };
+    return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, missingWeight: false, missingCategory: false, incomplete: false };
   }
   const missingOrder = !r.order.trim();
   const missingStore = !r.store;
   const missingQty = !qtyFilled;
   const missingWeight = requiresWeight && (!r.weight || r.weight === "");
+  const missingCategory = requiresCategory && !r.category;
   return {
-    hasData: true, missingOrder, missingStore, missingQty, missingWeight,
-    incomplete: missingOrder || missingStore || missingQty || missingWeight,
+    hasData: true, missingOrder, missingStore, missingQty, missingWeight, missingCategory,
+    incomplete: missingOrder || missingStore || missingQty || missingWeight || missingCategory,
   };
 };
+
+// товарные категории — для складов, где категория выбирается по каждому заказу отдельно
+const CATEGORY_OPTIONS = ["Сухой", "Оборудование", "Сыпучка", "Заморозка", "СП", "Охлажденка"];
 
 // магазины, которые встречаются в списке склада больше одного раза —
 // на один магазин может быть только один заказ
@@ -102,7 +108,7 @@ const findDuplicateStores = (rows) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "zhashylcha", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "murmanskoe", "zhashylcha", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -131,16 +137,11 @@ export default function ShipmentApp() {
   const [toast, setToast] = useState(null);
   const [activeTab, setActiveTab] = useState("prigorodnoe");
 
-  // подписка в реальном времени — если склад или ОТЛ поменяли что-то,
-  // все остальные видят это без перезагрузки
   useEffect(() => {
     setLoadingDay(true);
     const unsub = subscribeToDay(
       date,
       (data) => {
-        // самовосстановление: если список машин пуст (например, поле
-        // случайно удалили в консоли Firestore) — подставляем свежий
-        // список из справочника и сразу сохраняем его обратно
         if (!data.vehicles || data.vehicles.length === 0) {
           const seeded = seedVehiclesForDay();
           setDay({ ...data, vehicles: seeded });
@@ -172,7 +173,6 @@ export default function ShipmentApp() {
     return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
   }, [day]);
 
-  // ---- склад: строки заказов (debounce перед записью в Firestore) ----
   const saveTimer = useRef(null);
   const patchWarehouseRows = useCallback(
     (whId, updater) => {
@@ -208,9 +208,9 @@ export default function ShipmentApp() {
   const submitWarehouse = async (whId) => {
     const wh = WAREHOUSES.find((w) => w.id === whId);
     const qtyMode = wh.qtyMode || "default";
-    const rows = (day[`rows_${whId}`] || []).filter((r) => rowIssues(r, wh.requiresWeight, qtyMode).hasData);
+    const rows = (day[`rows_${whId}`] || []).filter((r) => rowIssues(r, wh.requiresWeight, qtyMode, wh.perOrderCategory).hasData);
     if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
-    const incompleteCount = rows.filter((r) => rowIssues(r, wh.requiresWeight, qtyMode).incomplete).length;
+    const incompleteCount = rows.filter((r) => rowIssues(r, wh.requiresWeight, qtyMode, wh.perOrderCategory).incomplete).length;
     if (incompleteCount > 0) {
       return showToast(
         incompleteCount === 1
@@ -234,7 +234,6 @@ export default function ShipmentApp() {
   };
   const unlockWarehouse = (whId) => setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
-  // ---- ОТЛ: транспорт ----
   const patchVehicles = useCallback(
     (updater) => {
       setDay((current) => {
@@ -275,13 +274,18 @@ export default function ShipmentApp() {
           pallets = parseInt(r.pallets, 10) || 0;
           boxes = parseInt(r.boxes, 10) || 0;
           total = Math.ceil((pallets + boxesToPallets(boxes)) * 100) / 100;
+        } else if (qtyMode === "palletsAmericanBoxes") {
+          pallets = parseInt(r.pallets, 10) || 0;
+          american = parseInt(r.american, 10) || 0;
+          boxes = parseInt(r.boxes, 10) || 0;
+          total = Math.ceil((pallets + american * EURO_AMERICAN_COEF + boxesToPallets(boxes)) * 100) / 100;
         } else {
           pallets = parseInt(r.pallets, 10) || 0;
           rolls = parseInt(r.rolls, 10) || 0;
           total = Math.ceil((pallets + rolls * COEFFICIENT) * 100) / 100;
         }
 
-        const fallbackWeight = qtyMode === "palletsBoxes" ? total * PALLET_KG : (pallets || 0) * PALLET_KG + (rolls || 0) * ROLL_KG;
+        const fallbackWeight = (qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes") ? total * PALLET_KG : (pallets || 0) * PALLET_KG + (rolls || 0) * ROLL_KG;
         const unloadSec = w.unloadPerPalletSec || PALLET_UNLOAD_SEC;
 
         rows.push({
@@ -291,7 +295,7 @@ export default function ShipmentApp() {
           weight: weight === null ? Math.round(fallbackWeight * 100) / 100 : Math.round(weight * 100) / 100,
           total,
           unloadSec,
-          group: GROUP_BY_WAREHOUSE[w.id] || "",
+          group: w.perOrderCategory ? (r.category || "") : (GROUP_BY_WAREHOUSE[w.id] || ""),
         });
       });
     });
@@ -411,12 +415,14 @@ export default function ShipmentApp() {
 function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel }) {
   const a = ACCENT[wh.accent];
   const requiresWeight = Boolean(wh.requiresWeight);
+  const requiresCategory = Boolean(wh.perOrderCategory);
   const qtyMode = wh.qtyMode || "default";
   const duplicateStores = useMemo(() => findDuplicateStores(rows), [rows]);
 
   const qtyDescription =
     qtyMode === "euroAmerican" ? "количество евро- и американских паллет" :
     qtyMode === "palletsBoxes" ? "количество паллет и коробок" :
+    qtyMode === "palletsAmericanBoxes" ? "количество паллет, американцев и коробок" :
     "количество паллет и роллкейджей";
 
   return (
@@ -427,8 +433,9 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
             <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Склад · {wh.name}
           </div>
           <p className="text-sm text-stone-500">
-            Заказ №, {qtyDescription}{requiresWeight ? ", вес" : ""} на {dateLabel}. Магазин выбирается из списка.
-            {qtyMode === "palletsBoxes" && " Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее)."}
+            Заказ №, {qtyDescription}{requiresWeight ? ", вес" : ""}{requiresCategory ? ", товарная категория" : ""} на {dateLabel}. Магазин выбирается из списка.
+            {(qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes") && " Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее)."}
+            {qtyMode === "palletsAmericanBoxes" && " Вес считается автоматически, вручную вводить не нужно."}
           </p>
         </div>
       </div>
@@ -444,7 +451,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
         </div>
       )}
 
-      <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
@@ -463,6 +470,13 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                   <th className="text-left font-semibold px-4 py-3 w-32">Коробки</th>
                 </>
               )}
+              {qtyMode === "palletsAmericanBoxes" && (
+                <>
+                  <th className="text-left font-semibold px-4 py-3 w-28">Паллеты</th>
+                  <th className="text-left font-semibold px-4 py-3 w-28">Американцы</th>
+                  <th className="text-left font-semibold px-4 py-3 w-28">Коробки</th>
+                </>
+              )}
               {qtyMode === "default" && (
                 <>
                   <th className="text-left font-semibold px-4 py-3 w-32">Паллеты</th>
@@ -470,6 +484,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                 </>
               )}
               {requiresWeight && <th className="text-left font-semibold px-4 py-3 w-32">Вес, кг</th>}
+              {requiresCategory && <th className="text-left font-semibold px-4 py-3 w-40">Товарная категория</th>}
               <th className="px-4 py-3 w-10" />
             </tr>
           </thead>
@@ -477,7 +492,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
             {rows.map((r, i) => {
               const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
               const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
-              const issues = rowIssues(r, requiresWeight, qtyMode);
+              const issues = rowIssues(r, requiresWeight, qtyMode, requiresCategory);
               const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
               const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
               return (
@@ -553,6 +568,38 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                       </td>
                     </>
                   )}
+                  {qtyMode === "palletsAmericanBoxes" && (
+                    <>
+                      <td className="px-4 py-2">
+                        <input
+                          type="text" inputMode="numeric" disabled={submitted} value={r.pallets}
+                          onChange={(e) => onUpdate(r.id, "pallets", e.target.value)}
+                          onPaste={(e) => { e.preventDefault(); onPasteQty(r.id, "pallets", e.clipboardData.getData("text")); }}
+                          placeholder="0"
+                          className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          type="text" inputMode="numeric" disabled={submitted} value={r.american}
+                          onChange={(e) => onUpdate(r.id, "american", e.target.value)}
+                          onPaste={(e) => { e.preventDefault(); onPasteQty(r.id, "american", e.clipboardData.getData("text")); }}
+                          placeholder="0"
+                          className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                        />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input
+                          type="text" inputMode="numeric" disabled={submitted} value={r.boxes}
+                          onChange={(e) => onUpdate(r.id, "boxes", e.target.value)}
+                          onPaste={(e) => { e.preventDefault(); onPasteQty(r.id, "boxes", e.clipboardData.getData("text")); }}
+                          placeholder="0"
+                          className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                        />
+                        {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите паллеты, американцев или коробки</div>}
+                      </td>
+                    </>
+                  )}
                   {qtyMode === "default" && (
                     <>
                       <td className="px-4 py-2">
@@ -585,6 +632,21 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                         className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingWeight ? errBorder : okBorder}`}
                       />
                       {issues.missingWeight && <div className="text-xs text-rose-600 mt-1">Укажите вес</div>}
+                    </td>
+                  )}
+                  {requiresCategory && (
+                    <td className="px-4 py-2">
+                      <select
+                        disabled={submitted} value={r.category}
+                        onChange={(e) => onUpdate(r.id, "category", e.target.value)}
+                        className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingCategory ? errBorder : okBorder}`}
+                      >
+                        <option value="">— выбрать категорию —</option>
+                        {CATEGORY_OPTIONS.map((c) => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                      {issues.missingCategory && <div className="text-xs text-rose-600 mt-1">Укажите категорию</div>}
                     </td>
                   )}
                   <td className="px-4 py-2 text-center">
