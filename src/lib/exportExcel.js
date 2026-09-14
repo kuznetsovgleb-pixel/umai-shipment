@@ -72,3 +72,9 @@ export function downloadWorkbook(dateIso, consolidated, vehicles) {
   const wb = buildWorkbook(dateIso, consolidated, vehicles);
   XLSX.writeFile(wb, `TMS_import_${dateIso}.xlsx`);
 }
+
+// Жашылча (ночь) — отдельная выгрузка, но тот же формат файла
+export function downloadZhashylchaWorkbook(dateIso, consolidated, vehicles) {
+  const wb = buildWorkbook(dateIso, consolidated, vehicles);
+  XLSX.writeFile(wb, `TMS_import_zhashylcha_${dateIso}.xlsx`);
+}
