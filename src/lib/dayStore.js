@@ -1,11 +1,11 @@
 import { doc, onSnapshot, setDoc, getDoc, updateDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import { VEHICLES_TEMPLATE } from "../data/reference";
+import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE } from "../data/reference";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
 export const seedVehiclesForDay = () =>
-    VEHICLES_TEMPLATE.filter((v) => v.carrier !== "ТК").map((v) => ({
+  VEHICLES_TEMPLATE.filter((v) => v.carrier !== "ТК").map((v) => ({
     id: uid(),
     extId: v.extId,
     plate: v.plate,
@@ -84,4 +84,64 @@ export async function setSubmitted(date, whId, value) {
 
 export async function saveVehicles(date, vehicles) {
   await updateDoc(dayRef(date), { vehicles });
+}
+
+// ---------------------------------------------------------------------------
+// Жашылча (ночь) — полностью отдельный контур: своя коллекция в Firestore,
+// свой список машин, всегда привязан к сегодняшней дате (заказы день в день)
+// ---------------------------------------------------------------------------
+
+export const seedZhashylchaVehicles = () =>
+  ZHASHYLCHA_VEHICLES_TEMPLATE.map((v) => ({
+    id: uid(),
+    extId: v.extId,
+    plate: v.plate,
+    carrier: v.carrier,
+    pallets: v.pallets,
+    tons: v.tons,
+    skills: v.skills,
+    from: v.from,
+    to: v.to,
+    start: v.start || "",
+    bodyType: v.bodyType || "",
+    gb: Boolean(v.gb),
+    maxPoints: v.maxPoints || "",
+    custom: false,
+    ready: false,
+  }));
+
+export const emptyZhashylchaDay = () => ({
+  rows: [makeEmptyRow()],
+  submitted: false,
+  vehicles: seedZhashylchaVehicles(),
+});
+
+const zhashylchaRef = (date) => doc(db, "shipments_zhashylcha", date);
+
+export function subscribeToZhashylchaDay(date, onChange, onError) {
+  return onSnapshot(
+    zhashylchaRef(date),
+    (snap) => {
+      if (snap.exists()) {
+        onChange(snap.data());
+      } else {
+        const seed = emptyZhashylchaDay();
+        setDoc(zhashylchaRef(date), seed).catch(() => {});
+        onChange(seed);
+      }
+    },
+    (err) => onError && onError(err)
+  );
+}
+
+export async function saveZhashylchaRows(date, rows) {
+  await updateDoc(zhashylchaRef(date), { rows });
+}
+
+export async function setZhashylchaSubmitted(date, value) {
+  await updateDoc(zhashylchaRef(date), { submitted: value });
+}
+
+export async function saveZhashylchaVehicles(date, vehicles) {
+  await updateDoc(zhashylchaRef(date), { vehicles });
 }
