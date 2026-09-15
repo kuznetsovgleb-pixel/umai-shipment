@@ -39,7 +39,7 @@ export const emptyDay = () => ({
   rows_sagadalieva_zamorozka: [makeEmptyRow()],
   rows_hlebzavod: [makeEmptyRow()],
   rows_kkcp: [makeEmptyRow()],
-    rows_transit_yug: [makeEmptyRow()],
+  rows_transit_yug: [makeEmptyRow()],
   rows_transit_sever: [makeEmptyRow()],
   submitted_prigorodnoe: false,
   submitted_argo: false,
@@ -48,7 +48,7 @@ export const emptyDay = () => ({
   submitted_sagadalieva_zamorozka: false,
   submitted_hlebzavod: false,
   submitted_kkcp: false,
-    submitted_transit_yug: false,
+  submitted_transit_yug: false,
   submitted_transit_sever: false,
   vehicles: seedVehiclesForDay(),
 });
