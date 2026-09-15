@@ -468,7 +468,6 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
       </div>
 
       {submitted && (
-            {submitted && (
         <div className="mb-4 flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-stone-700">
             <Lock size={15} className="text-stone-500" /> Данные за {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
