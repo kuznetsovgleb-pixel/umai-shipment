@@ -76,6 +76,7 @@ const boxesToPallets = (boxes) => (boxes > 0 ? Math.ceil(boxes / 20) * 0.5 : 0);
 const rowIssues = (r, requiresWeight = false, qtyMode = "default", requiresCategory = false) => {
   const qtyFilled =
     qtyMode === "euroAmerican" ? (r.euro !== "" || r.american !== "") :
+    qtyMode === "euroAmericanBoxes" ? (r.euro !== "" || r.american !== "" || r.boxes !== "") :
     qtyMode === "palletsBoxes" ? (r.pallets !== "" || r.boxes !== "") :
     qtyMode === "palletsAmericanBoxes" ? (r.pallets !== "" || r.american !== "" || r.boxes !== "") :
     (r.pallets !== "" || r.rolls !== "");
@@ -110,11 +111,12 @@ const findDuplicateStores = (rows) => {
 };
 
 const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "otl"];
+
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
 
 // точки старта для собственных ТС (у ТК точки старта нет — поле неактивно)
-const START_POINT_OPTIONS = ["Центральный офис", "РЦ Пригородное", "РЦ Жашылча", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка", "РЦ РМ и ПТО"];
+const START_POINT_OPTIONS = ["Центральный офис", "РЦ Пригородное", "РЦ Ак-Орго", "РЦ Жашылча", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка", "РЦ РМ и ПТО", "РЦ Транзит Юг", "РЦ Транзит Север"];
 
 // перевозчик — теперь фиксированный список, а не свободный текст
 // ТК больше не используется — весь транспорт свой
@@ -136,12 +138,29 @@ export default function ShipmentApp() {
   const [loadingDay, setLoadingDay] = useState(true);
   const [toast, setToast] = useState(null);
   const [activeTab, setActiveTab] = useState("prigorodnoe");
+  const [zhSubmitted, setZhSubmitted] = useState(false);
 
+  // лёгкая отдельная подписка только на статус Жашылчи (для строки статусов
+  // на вкладке «Для ОТЛ») — сами заказы сюда не подтягиваются, контур отдельный
+  useEffect(() => {
+    const unsub = subscribeToZhashylchaDay(
+      todayISO(),
+      (data) => setZhSubmitted(Boolean(data.submitted)),
+      () => {}
+    );
+    return unsub;
+  }, []);
+
+  // подписка в реальном времени — если склад или ОТЛ поменяли что-то,
+  // все остальные видят это без перезагрузки
   useEffect(() => {
     setLoadingDay(true);
     const unsub = subscribeToDay(
       date,
       (data) => {
+        // самовосстановление: если список машин пуст (например, поле
+        // случайно удалили в консоли Firestore) — подставляем свежий
+        // список из справочника и сразу сохраняем его обратно
         if (!data.vehicles || data.vehicles.length === 0) {
           const seeded = seedVehiclesForDay();
           setDay({ ...data, vehicles: seeded });
@@ -173,14 +192,19 @@ export default function ShipmentApp() {
     return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
   }, [day]);
 
-  const saveTimer = useRef(null);
+  // ---- склад: строки заказов (debounce перед записью в Firestore) ----
+  // отдельный таймер на каждую цель сохранения (по складу + отдельно для машин) —
+  // иначе быстрое редактирование одного места отменяет ещё не сработавшее
+  // сохранение другого места, и данные тихо теряются
+  const saveTimers = useRef({});
   const patchWarehouseRows = useCallback(
     (whId, updater) => {
       setDay((current) => {
         const nextRows = updater(current[`rows_${whId}`] || []);
         const next = { ...current, [`rows_${whId}`]: nextRows };
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
+        const key = `rows_${whId}`;
+        if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+        saveTimers.current[key] = setTimeout(() => {
           saveWarehouseRows(date, whId, nextRows).catch(() => showToast("Не удалось сохранить — проверьте связь"));
         }, 500);
         return next;
@@ -234,12 +258,14 @@ export default function ShipmentApp() {
   };
   const unlockWarehouse = (whId) => setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
+  // ---- ОТЛ: транспорт ----
   const patchVehicles = useCallback(
     (updater) => {
       setDay((current) => {
         const next = { ...current, vehicles: updater(current.vehicles || []) };
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
+        const key = "vehicles";
+        if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+        saveTimers.current[key] = setTimeout(() => {
           saveVehicles(date, next.vehicles).catch(() => showToast("Не удалось сохранить — проверьте связь"));
         }, 500);
         return next;
@@ -395,6 +421,7 @@ export default function ShipmentApp() {
             onRemoveVehicle={removeVehicle}
             onExport={exportExcel}
             dateLabel={fmtDateRu(date)}
+            zhSubmitted={zhSubmitted}
           />
         )}
       </div>
@@ -441,6 +468,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
       </div>
 
       {submitted && (
+            {submitted && (
         <div className="mb-4 flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-stone-700">
             <Lock size={15} className="text-stone-500" /> Данные за {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
@@ -683,7 +711,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
 // Вкладка ОТЛ
 // ---------------------------------------------------------------------------
 
-function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel }) {
+function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhSubmitted }) {
   const totalPallets = consolidated.reduce((s, r) => s + r.total, 0);
   const totalWeight = consolidated.reduce((s, r) => s + r.weight, 0);
   const [editingCapacity, setEditingCapacity] = useState({});
@@ -704,6 +732,11 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
             </div>
           );
         })}
+        <div className="flex items-center gap-1.5 text-sm font-medium border-l border-stone-200 pl-6">
+          {zhSubmitted ? <CheckCircle2 size={15} className="text-cyan-700" /> : <Circle size={15} className="text-stone-300" />}
+          <span className={zhSubmitted ? "text-stone-900" : "text-stone-400"}>РЦ Жашылча - молочка (ночь)</span>
+          <span className={`text-xs ${zhSubmitted ? "text-cyan-700" : "text-stone-400"}`}>{zhSubmitted ? "отправлено" : "ожидание"}</span>
+        </div>
       </div>
 
       <div>
@@ -922,7 +955,7 @@ function ZhashylchaPanel() {
   const [zhDay, setZhDay] = useState({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
   const [zhLoading, setZhLoading] = useState(true);
   const [toast, setToast] = useState(null);
-  const saveTimer = useRef(null);
+  const saveTimers = useRef({});
 
   const showToast = (msg) => {
     setToast(msg);
@@ -968,8 +1001,9 @@ function ZhashylchaPanel() {
       setZhDay((current) => {
         const nextRows = updater(current.rows || []);
         const next = { ...current, rows: nextRows };
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
+        const key = "rows";
+        if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+        saveTimers.current[key] = setTimeout(() => {
           saveZhashylchaRows(zhDate, nextRows).catch(() => showToast("Не удалось сохранить — проверьте связь"));
         }, 500);
         return next;
@@ -984,6 +1018,7 @@ function ZhashylchaPanel() {
         if (r.id !== rowId) return r;
         let v = value;
         if (field === "euro" || field === "american") v = sanitizeHalfStep(value);
+        if (field === "boxes") v = sanitizeQty(value);
         if (field === "weight") v = sanitizeWeight(value);
         return { ...r, [field]: v };
       })
@@ -993,9 +1028,9 @@ function ZhashylchaPanel() {
   const removeRow = (rowId) => patchRows((rs) => (rs.length > 1 ? rs.filter((r) => r.id !== rowId) : rs));
 
   const submitZh = async () => {
-    const filled = rows.filter((r) => rowIssues(r, true, "euroAmerican").hasData);
+    const filled = rows.filter((r) => rowIssues(r, true, "euroAmericanBoxes").hasData);
     if (filled.length === 0) return showToast("Нет заполненных строк для отправки");
-    const incompleteCount = filled.filter((r) => rowIssues(r, true, "euroAmerican").incomplete).length;
+    const incompleteCount = filled.filter((r) => rowIssues(r, true, "euroAmericanBoxes").incomplete).length;
     if (incompleteCount > 0) {
       return showToast(
         incompleteCount === 1
@@ -1022,8 +1057,9 @@ function ZhashylchaPanel() {
     (updater) => {
       setZhDay((current) => {
         const next = { ...current, vehicles: updater(current.vehicles || []) };
-        if (saveTimer.current) clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => {
+        const key = "vehicles";
+        if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+        saveTimers.current[key] = setTimeout(() => {
           saveZhashylchaVehicles(zhDate, next.vehicles).catch(() => showToast("Не удалось сохранить — проверьте связь"));
         }, 500);
         return next;
@@ -1046,11 +1082,12 @@ function ZhashylchaPanel() {
       .map((r) => {
         const euro = parseFloat(r.euro) || 0;
         const american = parseFloat(r.american) || 0;
+        const boxes = parseInt(r.boxes, 10) || 0;
         const weight = parseFloat(r.weight) || 0;
         return {
           id: r.id, order: r.order.trim(), store: r.store || "—",
-          euro, american,
-          total: Math.round((euro + american * EURO_AMERICAN_COEF) * 100) / 100,
+          euro, american, boxes,
+          total: Math.round((euro + american * EURO_AMERICAN_COEF + boxesToPallets(boxes)) * 100) / 100,
           weight: Math.round(weight * 100) / 100,
           shipPoint: ZH_SHIP_POINT,
           unloadSec: PALLET_UNLOAD_SEC,
@@ -1092,7 +1129,8 @@ function ZhashylchaPanel() {
               <span className="h-2 w-2 rounded-full bg-cyan-500" /> Склад · {ZH_DISPLAY_NAME}
             </div>
             <p className="text-sm text-stone-500">
-              Заказ №, количество евро- и американских паллет (шаг 0,5), вес на {dateLabel}. Магазин выбирается из списка.
+              Заказ №, количество евро- и американских паллет (шаг 0,5), коробок и вес на {dateLabel}. Магазин выбирается из списка.
+              Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее).
             </p>
           </div>
         </div>
@@ -1117,6 +1155,7 @@ function ZhashylchaPanel() {
                 <th className="text-left font-semibold px-4 py-3">Магазин</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Евро</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Американцы</th>
+                <th className="text-left font-semibold px-4 py-3 w-28">Коробки</th>
                 <th className="text-left font-semibold px-4 py-3 w-28">Вес, кг</th>
                 <th className="px-4 py-3 w-10" />
               </tr>
@@ -1125,7 +1164,7 @@ function ZhashylchaPanel() {
               {rows.map((r, i) => {
                 const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
                 const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
-                const issues = rowIssues(r, true, "euroAmerican");
+                const issues = rowIssues(r, true, "euroAmericanBoxes");
                 const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
                 const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
                 return (
@@ -1170,7 +1209,15 @@ function ZhashylchaPanel() {
                         placeholder="0"
                         className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
                       />
-                      {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите евро или американец</div>}
+                      {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите евро, американца или коробки</div>}
+                    </td>
+                    <td className="px-4 py-2">
+                      <input
+                        type="text" inputMode="numeric" disabled={zhDay.submitted} value={r.boxes}
+                        onChange={(e) => updateRow(r.id, "boxes", e.target.value)}
+                        placeholder="0"
+                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                      />
                     </td>
                     <td className="px-4 py-2">
                       <input
@@ -1217,7 +1264,7 @@ function ZhashylchaPanel() {
               Для ОТЛ · {ZH_DISPLAY_NAME} — {dateLabel} · {consolidated.length} заказ(ов)
             </h2>
             <p className="text-xs text-stone-400 mt-0.5">
-              Итого = евро + американцы × {EURO_AMERICAN_COEF} · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · товарная группа: {ZH_GROUP}
+              Итого = евро + американцы × {EURO_AMERICAN_COEF} + коробки (по ступеням 20/40) · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · товарная группа: {ZH_GROUP}
             </p>
           </div>
           <button onClick={exportZh} className="flex items-center gap-2 bg-stone-900 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-stone-700 transition-colors">
@@ -1233,6 +1280,7 @@ function ZhashylchaPanel() {
                 <th className="text-left font-semibold px-4 py-3">Магазин</th>
                 <th className="text-right font-semibold px-4 py-3">Евро</th>
                 <th className="text-right font-semibold px-4 py-3">Американцы</th>
+                <th className="text-right font-semibold px-4 py-3">Коробки</th>
                 <th className="text-right font-semibold px-4 py-3">Итого</th>
                 <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
               </tr>
@@ -1240,7 +1288,7 @@ function ZhashylchaPanel() {
             <tbody>
               {consolidated.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-stone-400">
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-stone-400">
                     Пока нет отправленных данных. Ждём кнопку «Отправить в транспортный отдел» выше.
                   </td>
                 </tr>
@@ -1251,6 +1299,7 @@ function ZhashylchaPanel() {
                     <td className="px-4 py-2 text-stone-700">{r.store}</td>
                     <td className="px-4 py-2 text-right font-mono text-stone-600">{r.euro}</td>
                     <td className="px-4 py-2 text-right font-mono text-stone-600">{r.american}</td>
+                    <td className="px-4 py-2 text-right font-mono text-stone-600">{r.boxes}</td>
                     <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{r.total}</td>
                     <td className="px-4 py-2 text-right font-mono text-stone-600">{r.weight}</td>
                   </tr>
