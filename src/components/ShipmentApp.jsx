@@ -393,7 +393,7 @@ export default function ShipmentApp() {
 
       <div className="max-w-6xl mx-auto px-6 py-6">
         {activeTab === "zhashylcha" ? (
-          <ZhashylchaPanel />
+          <ZhashylchaPanel date={date} />
         ) : loadingDay ? (
           <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
             <Loader2 size={16} className="animate-spin" /> Загрузка данных за {fmtDateRu(date)}…
@@ -477,8 +477,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
           </button>
         </div>
       )}
-
-      <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+            <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
@@ -949,9 +948,14 @@ const ZH_GROUP = "Охлажденка";
 const ZH_DISPLAY_NAME = "РЦ Жашылча - молочка (ночь)";
 const ZH_START_OPTIONS = ["РЦ Жашылча", "Центральный офис", "РЦ Пригородное", "РЦ Ак-Орго", "РЦ РМ и ПТО", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка"];
 
-function ZhashylchaPanel() {
-  const zhDate = useMemo(() => todayISO(), []);
-  const [zhDay, setZhDay] = useState({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
+function ZhashylchaPanel({ date }) {
+  // дата ввода всегда «сегодня» — эта вкладка просто следует за календариком
+  // наверху для ПРОСМОТРА: назад — архив прошлых дней, вперёд — пустая форма
+  const zhDate = date;
+  const today = todayISO();
+  const isToday = zhDate === today;
+  const isFuture = zhDate > today;
+    const [zhDay, setZhDay] = useState({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
   const [zhLoading, setZhLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const saveTimers = useRef({});
@@ -962,13 +966,19 @@ function ZhashylchaPanel() {
   };
 
   useEffect(() => {
+    // будущая дата — заказы день в день, туда ещё рано, базу не трогаем вообще
+    if (zhDate > todayISO()) {
+      setZhDay({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
+      setZhLoading(false);
+      return;
+    }
     setZhLoading(true);
     const unsub = subscribeToZhashylchaDay(
       zhDate,
       (data) => {
-        // самовосстановление: если список машин пуст — подставляем свежий
-        // список из справочника Жашылча и сразу сохраняем его обратно
-        if (!data.vehicles || data.vehicles.length === 0) {
+        // самовосстановление списка машин — только для сегодняшнего дня;
+        // для архивных дат ничего не досоздаём, это просто просмотр истории
+        if (zhDate === todayISO() && (!data.vehicles || data.vehicles.length === 0)) {
           const seeded = seedZhashylchaVehicles();
           setZhDay({ ...data, vehicles: seeded });
           saveZhashylchaVehicles(zhDate, seeded).catch(() => {});
@@ -1113,11 +1123,27 @@ function ZhashylchaPanel() {
     );
   }
 
+  if (isFuture) {
+    return (
+      <div className="space-y-4">
+        <div className="bg-cyan-50 border border-cyan-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-cyan-800">
+          <Moon size={14} />
+          Отдельный контур: заказы подаются день в день, дата ввода всегда «сегодня» ({fmtDateRu(today)}).
+        </div>
+        <div className="bg-white border border-stone-200 rounded-xl px-6 py-16 text-center text-sm text-stone-400">
+          {dateLabel} ещё не наступила — форма для {ZH_DISPLAY_NAME} откроется автоматически в этот день.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8">
       <div className="bg-cyan-50 border border-cyan-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-cyan-800">
         <Moon size={14} />
-        Отдельный контур: свой список заказов, свои ТС и своя выгрузка — не пересекается с остальными складами. Всегда дата «сегодня» ({dateLabel}), заказы подаются день в день.
+        {isToday
+          ? `Отдельный контур: свой список заказов, свои ТС и своя выгрузка — не пересекается с остальными складами. Всегда дата «сегодня» (${dateLabel}), заказы подаются день в день.`
+          : `Архив за ${dateLabel} — только просмотр. Ввод и редактирование доступны исключительно на сегодняшний день (${fmtDateRu(today)}).`}
       </div>
 
       {/* ---- блок склада: ввод заказов ---- */}
@@ -1139,9 +1165,11 @@ function ZhashylchaPanel() {
             <div className="flex items-center gap-2 text-sm text-stone-700">
               <Lock size={15} className="text-stone-500" /> Данные за {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
             </div>
-            <button onClick={unlockZh} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900 whitespace-nowrap">
-              Вернуть на редактирование
-            </button>
+            {isToday && (
+              <button onClick={unlockZh} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900 whitespace-nowrap">
+                Вернуть на редактирование
+              </button>
+            )}
           </div>
         )}
 
@@ -1171,7 +1199,7 @@ function ZhashylchaPanel() {
                     <td className="px-4 py-2 text-stone-400 font-mono text-xs pt-2.5">{i + 1}</td>
                     <td className="px-4 py-2">
                       <input
-                        type="text" disabled={zhDay.submitted} value={r.order}
+                        type="text" disabled={!isToday || zhDay.submitted} value={r.order}
                         onChange={(e) => updateRow(r.id, "order", e.target.value)}
                         placeholder="напр. 100234"
                         className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${isDupe || issues.missingOrder ? errBorder : okBorder}`}
@@ -1181,7 +1209,7 @@ function ZhashylchaPanel() {
                     </td>
                     <td className="px-4 py-2">
                       <select
-                        disabled={zhDay.submitted} value={r.store}
+                        disabled={!isToday || zhDay.submitted} value={r.store}
                         onChange={(e) => updateRow(r.id, "store", e.target.value)}
                         className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingStore || isDupeStore ? errBorder : okBorder}`}
                       >
@@ -1195,7 +1223,7 @@ function ZhashylchaPanel() {
                     </td>
                     <td className="px-4 py-2">
                       <input
-                        type="text" inputMode="decimal" disabled={zhDay.submitted} value={r.euro}
+                        type="text" inputMode="decimal" disabled={!isToday || zhDay.submitted} value={r.euro}
                         onChange={(e) => updateRow(r.id, "euro", e.target.value)}
                         placeholder="0"
                         className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
@@ -1203,7 +1231,7 @@ function ZhashylchaPanel() {
                     </td>
                     <td className="px-4 py-2">
                       <input
-                        type="text" inputMode="decimal" disabled={zhDay.submitted} value={r.american}
+                        type="text" inputMode="decimal" disabled={!isToday || zhDay.submitted} value={r.american}
                         onChange={(e) => updateRow(r.id, "american", e.target.value)}
                         placeholder="0"
                         className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
@@ -1212,7 +1240,7 @@ function ZhashylchaPanel() {
                     </td>
                     <td className="px-4 py-2">
                       <input
-                        type="text" inputMode="numeric" disabled={zhDay.submitted} value={r.boxes}
+                        type="text" inputMode="numeric" disabled={!isToday || zhDay.submitted} value={r.boxes}
                         onChange={(e) => updateRow(r.id, "boxes", e.target.value)}
                         placeholder="0"
                         className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
@@ -1220,7 +1248,7 @@ function ZhashylchaPanel() {
                     </td>
                     <td className="px-4 py-2">
                       <input
-                        type="text" inputMode="decimal" disabled={zhDay.submitted} value={r.weight}
+                        type="text" inputMode="decimal" disabled={!isToday || zhDay.submitted} value={r.weight}
                         onChange={(e) => updateRow(r.id, "weight", e.target.value)}
                         placeholder="0"
                         className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingWeight ? errBorder : okBorder}`}
@@ -1228,7 +1256,7 @@ function ZhashylchaPanel() {
                       {issues.missingWeight && <div className="text-xs text-rose-600 mt-1">Укажите вес</div>}
                     </td>
                     <td className="px-4 py-2 text-center">
-                      {!zhDay.submitted && (
+                      {isToday && !zhDay.submitted && (
                         <button onClick={() => removeRow(r.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
                           <Trash2 size={16} />
                         </button>
@@ -1239,14 +1267,14 @@ function ZhashylchaPanel() {
               })}
             </tbody>
           </table>
-          {!zhDay.submitted && (
+          {isToday && !zhDay.submitted && (
             <button onClick={addRow} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
               <Plus size={15} /> Добавить заказ
             </button>
           )}
         </div>
 
-        {!zhDay.submitted && (
+        {isToday && !zhDay.submitted && (
           <div className="flex justify-end mt-4">
             <button onClick={submitZh} className="flex items-center gap-2 bg-cyan-600 text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:opacity-90 transition-opacity shadow-sm">
               <Send size={15} /> Отправить в транспортный отдел
@@ -1328,13 +1356,14 @@ function ZhashylchaPanel() {
               {(zhDay.vehicles || []).map((v) => (
                 <tr key={v.id} className="border-t border-stone-100">
                   <td className="px-4 py-2">
-                    <input type="text" disabled={!v.custom} value={v.plate} onChange={(e) => updateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
+                    <input type="text" disabled={!isToday || !v.custom} value={v.plate} onChange={(e) => updateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
                   </td>
                   <td className="px-4 py-2">
                     <select
+                      disabled={!isToday}
                       value={v.start || ""}
                       onChange={(e) => updateVehicle(v.id, "start", e.target.value)}
-                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white"
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
                     >
                       <option value="">— выбрать точку —</option>
                       {ZH_START_OPTIONS.map((s) => (
@@ -1343,27 +1372,29 @@ function ZhashylchaPanel() {
                     </select>
                   </td>
                   <td className="px-4 py-2">
-                    <input type="text" inputMode="numeric" value={v.pallets} onChange={(e) => updateVehicle(v.id, "pallets", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
+                    <input type="text" inputMode="numeric" disabled={!isToday} value={v.pallets} onChange={(e) => updateVehicle(v.id, "pallets", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
                   </td>
                   <td className="px-4 py-2">
-                    <input type="text" inputMode="numeric" value={v.tons} onChange={(e) => updateVehicle(v.id, "tons", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
+                    <input type="text" inputMode="numeric" disabled={!isToday} value={v.tons} onChange={(e) => updateVehicle(v.id, "tons", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
                   </td>
                   <td className="px-4 py-2">
                     <button
+                      disabled={!isToday}
                       onClick={() => updateVehicle(v.id, "gb", !v.gb)}
-                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors ${v.gb ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
+                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors disabled:opacity-50 ${v.gb ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
                     >
                       {v.gb ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.gb ? "Есть" : "Нет"}
                     </button>
                   </td>
                   <td className="px-4 py-2">
-                    <input type="text" inputMode="numeric" value={v.maxPoints} onChange={(e) => updateVehicle(v.id, "maxPoints", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400" />
+                    <input type="text" inputMode="numeric" disabled={!isToday} value={v.maxPoints} onChange={(e) => updateVehicle(v.id, "maxPoints", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
                   </td>
                   <td className="px-4 py-2">
                     <select
+                      disabled={!isToday}
                       value={v.from || "09:00"}
                       onChange={(e) => updateVehicle(v.id, "from", e.target.value)}
-                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white"
+                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
                     >
                       {LOAD_TIME_OPTIONS.map((t) => (
                         <option key={t} value={t}>{t}</option>
@@ -1372,24 +1403,29 @@ function ZhashylchaPanel() {
                   </td>
                   <td className="px-4 py-2">
                     <button
+                      disabled={!isToday}
                       onClick={() => updateVehicle(v.id, "ready", !v.ready)}
-                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors ${v.ready ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
+                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors disabled:opacity-50 ${v.ready ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
                     >
                       {v.ready ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.ready ? "Готов" : "Не готов"}
                     </button>
                   </td>
                   <td className="px-4 py-2 text-center">
-                    <button onClick={() => removeVehicle(v.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
-                      <Trash2 size={16} />
-                    </button>
+                    {isToday && (
+                      <button onClick={() => removeVehicle(v.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <button onClick={addVehicle} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
-            <Plus size={15} /> Добавить ТС
-          </button>
+          {isToday && (
+            <button onClick={addVehicle} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
+              <Plus size={15} /> Добавить ТС
+            </button>
+          )}
         </div>
       </div>
 
