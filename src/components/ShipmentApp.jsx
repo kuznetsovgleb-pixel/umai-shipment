@@ -947,6 +947,8 @@ const ZH_SHIP_POINT = "РЦ Жашылча";
 const ZH_GROUP = "Охлажденка";
 const ZH_DISPLAY_NAME = "РЦ Жашылча - молочка (ночь)";
 const ZH_START_OPTIONS = ["РЦ Жашылча", "Центральный офис", "РЦ Пригородное", "РЦ Ак-Орго", "РЦ РМ и ПТО", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка"];
+// Жашылча работает ночью — своя, более поздняя шкала времени погрузки
+const ZH_LOAD_TIME_OPTIONS = ["18:00", "19:00", "20:00", "21:00", "22:00", "23:00"];
 
 function ZhashylchaPanel({ date }) {
   // дата ввода всегда «сегодня» — эта вкладка просто следует за календариком
@@ -955,7 +957,8 @@ function ZhashylchaPanel({ date }) {
   const today = todayISO();
   const isToday = zhDate === today;
   const isFuture = zhDate > today;
-    const [zhDay, setZhDay] = useState({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
+  
+  const [zhDay, setZhDay] = useState({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
   const [zhLoading, setZhLoading] = useState(true);
   const [toast, setToast] = useState(null);
   const saveTimers = useRef({});
@@ -1079,7 +1082,7 @@ function ZhashylchaPanel({ date }) {
   const addVehicle = () =>
     patchVehicles((vs) => [
       ...vs,
-      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "УмайГрупп", pallets: "", tons: "", skills: "", from: "09:00", to: "19:00", start: ZH_SHIP_POINT, bodyType: "РЕФ", gb: false, maxPoints: "", custom: true, ready: false },
+      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "УмайГрупп", pallets: "", tons: "", skills: "", from: "21:00", to: "19:00", start: ZH_SHIP_POINT, bodyType: "РЕФ", gb: false, maxPoints: "", custom: true, ready: false },
     ]);
   const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
@@ -1333,6 +1336,19 @@ function ZhashylchaPanel({ date }) {
                 ))
               )}
             </tbody>
+            {consolidated.length > 0 && (
+              <tfoot>
+                <tr className="border-t border-stone-200 bg-stone-50">
+                  <td colSpan={5} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">
+                    {Math.round(consolidated.reduce((s, r) => s + r.total, 0) * 100) / 100}
+                  </td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">
+                    {Math.round(consolidated.reduce((s, r) => s + r.weight, 0) * 100) / 100}
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
 
@@ -1392,11 +1408,11 @@ function ZhashylchaPanel({ date }) {
                   <td className="px-4 py-2">
                     <select
                       disabled={!isToday}
-                      value={v.from || "09:00"}
+                      value={v.from || "21:00"}
                       onChange={(e) => updateVehicle(v.id, "from", e.target.value)}
                       className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
                     >
-                      {LOAD_TIME_OPTIONS.map((t) => (
+                      {ZH_LOAD_TIME_OPTIONS.map((t) => (
                         <option key={t} value={t}>{t}</option>
                       ))}
                     </select>
