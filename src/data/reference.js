@@ -532,15 +532,15 @@ export const VEHICLES_TEMPLATE = [
 ];
 
 export const ZHASHYLCHA_VEHICLES_TEMPLATE = [
-  {"extId": "01KG4343M", "plate": "014343M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
-  {"extId": "01KG731BR", "plate": "01731BR", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": true},
-  {"extId": "01KG5641M", "plate": "015641M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
-  {"extId": "01KG734BR", "plate": "01734BR", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": true},
-  {"extId": "01KG2951M", "plate": "012951M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
-  {"extId": "01KG7990M", "plate": "017990M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 7, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": true},
-  {"extId": "01KG4342M", "plate": "014342M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
-  {"extId": "01KG1185M", "plate": "011185M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
-  {"extId": "01KG2444M", "plate": "012444M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "09:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
+  {"extId": "01KG4343M", "plate": "014343M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
+  {"extId": "01KG731BR", "plate": "01731BR", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": true},
+  {"extId": "01KG5641M", "plate": "015641M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
+  {"extId": "01KG734BR", "plate": "01734BR", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": true},
+  {"extId": "01KG2951M", "plate": "012951M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
+  {"extId": "01KG7990M", "plate": "017990M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 10, "tons": 7, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": true},
+  {"extId": "01KG4342M", "plate": "014342M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
+  {"extId": "01KG1185M", "plate": "011185M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
+  {"extId": "01KG2444M", "plate": "012444M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
 ];
 
 export const WAREHOUSES = [
