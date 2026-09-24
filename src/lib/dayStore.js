@@ -1,4 +1,4 @@
-import { doc, onSnapshot, setDoc, getDoc, updateDoc } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
 import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE } from "../data/reference";
 
@@ -63,7 +63,11 @@ export function subscribeToDay(date, onChange, onError) {
         onChange(snap.data());
       } else {
         const seed = emptyDay();
-        setDoc(dayRef(date), seed).catch(() => {});
+        // merge:true — на случай, если два клиента одновременно откроют
+        // новый день, вторая запись не затрёт первую, а сольётся с ней.
+        setDoc(dayRef(date), seed, { merge: true }).catch((err) =>
+          console.error("[dayStore] seed creation failed for", date, err)
+        );
         onChange(seed);
       }
     },
@@ -74,20 +78,52 @@ export function subscribeToDay(date, onChange, onError) {
 export async function ensureDayExists(date) {
   const snap = await getDoc(dayRef(date));
   if (!snap.exists()) {
-    await setDoc(dayRef(date), emptyDay());
+    await setDoc(dayRef(date), emptyDay(), { merge: true });
   }
 }
 
+// ---------------------------------------------------------------------------
+// Запись данных склада/машин на день.
+//
+// Раньше здесь стоял updateDoc — он требует, чтобы документ дня уже
+// существовал. Если сохранение приходило раньше, чем завершалось создание
+// документа в subscribeToDay (а оно не ожидалось — "выстрелил и забыл"),
+// updateDoc падал с "No document to update", и это падение никто не ловил:
+// на экране склада данные выглядели введёнными, а в базе не сохранялось
+// ничего. setDoc(..., { merge: true }) создаёт документ при необходимости
+// и в любом случае мержит указанное поле, не трогая остальные — гонка
+// становится невозможной в принципе.
+//
+// Ошибки теперь не проглатываются: пишем в консоль и пробрасываем дальше,
+// чтобы вызывающий код (например, обработчик в ShipmentApp.jsx) мог
+// показать складу видимое сообщение "не удалось сохранить".
+// ---------------------------------------------------------------------------
+
 export async function saveWarehouseRows(date, whId, rows) {
-  await updateDoc(dayRef(date), { [`rows_${whId}`]: rows });
+  try {
+    await setDoc(dayRef(date), { [`rows_${whId}`]: rows }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] saveWarehouseRows failed", { date, whId }, err);
+    throw err;
+  }
 }
 
 export async function setSubmitted(date, whId, value) {
-  await updateDoc(dayRef(date), { [`submitted_${whId}`]: value });
+  try {
+    await setDoc(dayRef(date), { [`submitted_${whId}`]: value }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] setSubmitted failed", { date, whId, value }, err);
+    throw err;
+  }
 }
 
 export async function saveVehicles(date, vehicles) {
-  await updateDoc(dayRef(date), { vehicles });
+  try {
+    await setDoc(dayRef(date), { vehicles }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] saveVehicles failed", { date }, err);
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +166,9 @@ export function subscribeToZhashylchaDay(date, onChange, onError) {
         onChange(snap.data());
       } else {
         const seed = emptyZhashylchaDay();
-        setDoc(zhashylchaRef(date), seed).catch(() => {});
+        setDoc(zhashylchaRef(date), seed, { merge: true }).catch((err) =>
+          console.error("[dayStore] zhashylcha seed creation failed for", date, err)
+        );
         onChange(seed);
       }
     },
@@ -139,13 +177,28 @@ export function subscribeToZhashylchaDay(date, onChange, onError) {
 }
 
 export async function saveZhashylchaRows(date, rows) {
-  await updateDoc(zhashylchaRef(date), { rows });
+  try {
+    await setDoc(zhashylchaRef(date), { rows }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] saveZhashylchaRows failed", { date }, err);
+    throw err;
+  }
 }
 
 export async function setZhashylchaSubmitted(date, value) {
-  await updateDoc(zhashylchaRef(date), { submitted: value });
+  try {
+    await setDoc(zhashylchaRef(date), { submitted: value }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] setZhashylchaSubmitted failed", { date, value }, err);
+    throw err;
+  }
 }
 
 export async function saveZhashylchaVehicles(date, vehicles) {
-  await updateDoc(zhashylchaRef(date), { vehicles });
+  try {
+    await setDoc(zhashylchaRef(date), { vehicles }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] saveZhashylchaVehicles failed", { date }, err);
+    throw err;
+  }
 }
