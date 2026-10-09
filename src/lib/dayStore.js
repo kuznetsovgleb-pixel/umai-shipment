@@ -1,6 +1,6 @@
 import { doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE } from "../data/reference";
+import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE, KARAKOL_WAREHOUSE_IDS } from "../data/reference";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -199,6 +199,60 @@ export async function saveZhashylchaVehicles(date, vehicles) {
     await setDoc(zhashylchaRef(date), { vehicles }, { merge: true });
   } catch (err) {
     console.error("[dayStore] saveZhashylchaVehicles failed", { date }, err);
+    throw err;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Каракол — отдельная коллекция shipments_karakol/{YYYY-MM-DD}.
+// 4 склада (Пригородное, Ак-Орго, ПТО, Садыгалиева-сыпучка), у каждого свои
+// rows_<id> и submitted_<id>. Транспорта здесь нет.
+// Следует календарю сверху — как основные склады.
+// ---------------------------------------------------------------------------
+
+export const emptyKarakolDay = () => {
+  const day = {};
+  KARAKOL_WAREHOUSE_IDS.forEach((id) => {
+    day[`rows_${id}`] = [makeEmptyRow()];
+    day[`submitted_${id}`] = false;
+  });
+  return day;
+};
+
+const karakolRef = (date) => doc(db, "shipments_karakol", date);
+
+export function subscribeToKarakolDay(date, onChange, onError) {
+  return onSnapshot(
+    karakolRef(date),
+    (snap) => {
+      if (snap.exists()) {
+        onChange(snap.data());
+      } else {
+        const seed = emptyKarakolDay();
+        setDoc(karakolRef(date), seed, { merge: true }).catch((err) =>
+          console.error("[dayStore] karakol seed creation failed for", date, err)
+        );
+        onChange(seed);
+      }
+    },
+    (err) => onError && onError(err)
+  );
+}
+
+export async function saveKarakolRows(date, whId, rows) {
+  try {
+    await setDoc(karakolRef(date), { [`rows_${whId}`]: rows }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] saveKarakolRows failed", { date, whId }, err);
+    throw err;
+  }
+}
+
+export async function setKarakolSubmitted(date, whId, value) {
+  try {
+    await setDoc(karakolRef(date), { [`submitted_${whId}`]: value }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] setKarakolSubmitted failed", { date, whId, value }, err);
     throw err;
   }
 }
