@@ -1,14 +1,15 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   Plus, Trash2, Send, Download, Truck, CheckCircle2, Circle, AlertTriangle,
-  Lock, Pencil, Check, Loader2, Wifi, Users, Moon,
+  Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
 } from "lucide-react";
-import { WAREHOUSES, STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
+  emptyKarakolDay, subscribeToKarakolDay, saveKarakolRows, setKarakolSubmitted,
 } from "../lib/dayStore";
-import { downloadWorkbook, downloadZhashylchaWorkbook } from "../lib/exportExcel";
+import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers } from "../lib/exportExcel";
 
 const ACCENT = {
   emerald: { text: "text-emerald-700", bg: "bg-emerald-600", dot: "bg-emerald-500" },
@@ -21,6 +22,7 @@ const ACCENT = {
   cyan: { text: "text-cyan-700", bg: "bg-cyan-600", dot: "bg-cyan-500" },
   teal: { text: "text-teal-700", bg: "bg-teal-600", dot: "bg-teal-500" },
   lime: { text: "text-lime-700", bg: "bg-lime-600", dot: "bg-lime-500" },
+  fuchsia: { text: "text-fuchsia-700", bg: "bg-fuchsia-600", dot: "bg-fuchsia-500" },
 };
 
 const todayISO = () => {
@@ -110,7 +112,7 @@ const findDuplicateStores = (rows) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "karakol", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -132,6 +134,246 @@ const GROUP_BY_WAREHOUSE = {
   kkcp: "СП",
 };
 
+// очистка значения поля строки заказа по его типу
+const sanitizeField = (field, value) => {
+  if (field === "pallets" || field === "rolls" || field === "euro" || field === "american" || field === "boxes") return sanitizeQty(value);
+  if (field === "weight") return sanitizeWeight(value);
+  return value;
+};
+
+// проверка перед отправкой склада в ОТЛ: возвращает текст ошибки или null
+const submitCheck = (wh, allRows, duplicateOrders) => {
+  const qtyMode = wh.qtyMode || "default";
+  const rows = allRows.filter((r) => rowIssues(r, wh.requiresWeight, qtyMode, wh.perOrderCategory).hasData);
+  if (rows.length === 0) return "Нет заполненных строк для отправки";
+  const incompleteCount = rows.filter((r) => rowIssues(r, wh.requiresWeight, qtyMode, wh.perOrderCategory).incomplete).length;
+  if (incompleteCount > 0) {
+    return incompleteCount === 1
+      ? "Одна строка заполнена не полностью — проверьте подсвеченные поля"
+      : `${incompleteCount} строк заполнены не полностью — проверьте подсвеченные поля`;
+  }
+  if (rows.some((r) => duplicateOrders.has(r.order.trim().toLowerCase()))) {
+    return "Есть повторяющиеся номера заказов — исправьте перед отправкой";
+  }
+  const dupStores = findDuplicateStores(rows);
+  if (rows.some((r) => dupStores.has(r.store.trim().toLowerCase()))) {
+    return "На один магазин может быть только один заказ — исправьте повторяющиеся магазины";
+  }
+  return null;
+};
+
+// дубли номеров заказов среди заданных складов
+const findDuplicateOrders = (warehouses, dayData) => {
+  const counts = {};
+  warehouses.forEach((w) => {
+    (dayData[`rows_${w.id}`] || []).forEach((r) => {
+      const key = r.order.trim().toLowerCase();
+      if (!key) return;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+  });
+  return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
+};
+
+// консолидация отправленных заказов складов в плоский список (для ОТЛ и выгрузки)
+const consolidateRows = (warehouses, dayData) => {
+  const rows = [];
+  warehouses.forEach((w) => {
+    if (!dayData[`submitted_${w.id}`]) return;
+    const qtyMode = w.qtyMode || "default";
+    (dayData[`rows_${w.id}`] || []).forEach((r) => {
+      if (!r.order.trim()) return;
+      const weight = w.requiresWeight ? parseFloat(r.weight) || 0 : null;
+
+      let pallets = null, rolls = null, euro = null, american = null, boxes = null, total;
+
+      if (qtyMode === "euroAmerican") {
+        euro = parseInt(r.euro, 10) || 0;
+        american = parseInt(r.american, 10) || 0;
+        total = Math.ceil((euro + american * EURO_AMERICAN_COEF) * 100) / 100;
+      } else if (qtyMode === "palletsBoxes") {
+        pallets = parseInt(r.pallets, 10) || 0;
+        boxes = parseInt(r.boxes, 10) || 0;
+        total = Math.ceil((pallets + boxesToPallets(boxes)) * 100) / 100;
+      } else if (qtyMode === "palletsAmericanBoxes") {
+        pallets = parseInt(r.pallets, 10) || 0;
+        american = parseInt(r.american, 10) || 0;
+        boxes = parseInt(r.boxes, 10) || 0;
+        total = Math.ceil((pallets + american * EURO_AMERICAN_COEF + boxesToPallets(boxes)) * 100) / 100;
+      } else {
+        pallets = parseInt(r.pallets, 10) || 0;
+        rolls = parseInt(r.rolls, 10) || 0;
+        total = Math.ceil((pallets + rolls * COEFFICIENT) * 100) / 100;
+      }
+
+      const fallbackWeight = (qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes") ? total * PALLET_KG : (pallets || 0) * PALLET_KG + (rolls || 0) * ROLL_KG;
+      const unloadSec = w.unloadPerPalletSec || PALLET_UNLOAD_SEC;
+
+      rows.push({
+        id: r.id, whId: w.id, warehouse: w.name, shipPoint: w.shipPoint, accent: w.accent,
+        order: r.order.trim(), store: r.store || "—",
+        pallets, rolls, euro, american, boxes,
+        weight: weight === null ? Math.round(fallbackWeight * 100) / 100 : Math.round(weight * 100) / 100,
+        total,
+        unloadSec,
+        group: w.perOrderCategory ? (r.category || "") : (GROUP_BY_WAREHOUSE[w.id] || ""),
+      });
+    });
+  });
+  return rows;
+};
+
+// ---------------------------------------------------------------------------
+// Выбор магазина с поиском: можно набрать номер или часть названия
+// ("глобус 10", "spar 7", "токмок", "45"), стрелки ↑↓ и Enter — выбор.
+// Список выпадает поверх таблицы (position: fixed), поэтому не обрезается
+// контейнером с прокруткой.
+// ---------------------------------------------------------------------------
+
+const normName = (s) => s.toLowerCase().replace(/ё/g, "е");
+const squash = (s) => normName(s).replace(/[\s\-_.()]/g, "");
+
+const searchStores = (query) => {
+  const raw = normName(query).trim();
+  if (!raw) return STORES;
+  const q = squash(raw);
+  const tokens = raw.split(/\s+/);
+  const scored = [];
+  STORES.forEach((s) => {
+    const sq = squash(s);
+    const lower = normName(s);
+    let rank = -1;
+    if (sq.includes(q)) {
+      if (sq.startsWith(q)) {
+        const next = sq[q.length];
+        rank = /\d$/.test(q) && next && /\d/.test(next) ? 1 : 0;
+      } else rank = 2;
+    } else if (tokens.every((t) => lower.includes(t))) {
+      rank = 3;
+    }
+    if (rank >= 0) scored.push({ s, rank });
+  });
+  return scored.sort((a, b) => a.rank - b.rank).map((x) => x.s);
+};
+
+function StoreSelect({ value, onChange, disabled, hasError }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [hi, setHi] = useState(0);
+  const [pos, setPos] = useState(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  const items = useMemo(() => {
+    const found = searchStores(query);
+    return query === "" && value ? ["", ...found] : found;
+  }, [query, value]);
+
+  const updatePos = useCallback(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const below = window.innerHeight - r.bottom;
+    const up = below < 220 && r.top > below;
+    setPos({
+      left: r.left,
+      width: Math.max(r.width, 280),
+      top: up ? undefined : r.bottom + 4,
+      bottom: up ? window.innerHeight - r.top + 4 : undefined,
+      maxH: Math.max(120, Math.min(280, (up ? r.top : below) - 12)),
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (e) => {
+      if (listRef.current && e.target instanceof Node && listRef.current.contains(e.target)) return;
+      updatePos();
+    };
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", updatePos);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", updatePos);
+    };
+  }, [open, updatePos]);
+
+  // подсвеченный пункт всегда в видимой части списка
+  useEffect(() => {
+    if (!open || !listRef.current) return;
+    const el = listRef.current.querySelector(`[data-i="${hi}"]`);
+    const l = listRef.current;
+    if (!el) return;
+    if (el.offsetTop < l.scrollTop) l.scrollTop = el.offsetTop;
+    else if (el.offsetTop + el.offsetHeight > l.scrollTop + l.clientHeight) l.scrollTop = el.offsetTop + el.offsetHeight - l.clientHeight;
+  }, [hi, open, items]);
+
+  const openList = () => {
+    if (disabled) return;
+    setQuery("");
+    setHi(0);
+    updatePos();
+    setOpen(true);
+  };
+  const choose = (s) => {
+    onChange(s);
+    setOpen(false);
+    inputRef.current?.blur();
+  };
+  const onKeyDown = (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(h + 1, items.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
+    else if (e.key === "Enter") { e.preventDefault(); if (items.length > 0) choose(items[hi] ?? items[0]); }
+    else if (e.key === "Escape") { setOpen(false); inputRef.current?.blur(); }
+  };
+
+  const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
+  const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
+
+  return (
+    <div className="relative">
+      <input
+        ref={inputRef}
+        type="text"
+        disabled={disabled}
+        value={open ? query : value}
+        title={value}
+        placeholder={open && value ? value : "— выбрать магазин —"}
+        onFocus={openList}
+        onChange={(e) => { setQuery(e.target.value); setHi(0); if (!open) { updatePos(); setOpen(true); } }}
+        onBlur={() => setOpen(false)}
+        onKeyDown={onKeyDown}
+        autoComplete="off"
+        className={`w-full text-sm rounded-md border pl-2 pr-7 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${hasError ? errBorder : okBorder}`}
+      />
+      <Search size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-stone-300 pointer-events-none" />
+      {open && pos && (
+        <div
+          ref={listRef}
+          onMouseDown={(e) => e.preventDefault()}
+          style={{ position: "fixed", left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom, maxHeight: pos.maxH }}
+          className="z-50 overflow-y-auto bg-white border border-stone-300 rounded-lg shadow-lg py-1"
+        >
+          {items.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-stone-400">Ничего не найдено</div>
+          ) : (
+            items.map((s, i) => (
+              <div
+                key={s || "__clear"}
+                data-i={i}
+                onClick={() => choose(s)}
+                onMouseEnter={() => setHi(i)}
+                className={`px-3 py-1.5 text-sm cursor-pointer ${i === hi ? "bg-stone-100" : ""} ${s === "" ? "text-stone-400 italic" : s === value ? "font-semibold text-stone-900" : "text-stone-700"}`}
+              >
+                {s === "" ? "— очистить выбор —" : s}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
   const [day, setDay] = useState(emptyDay());
@@ -139,6 +381,10 @@ export default function ShipmentApp() {
   const [toast, setToast] = useState(null);
   const [activeTab, setActiveTab] = useState("prigorodnoe");
   const [zhSubmitted, setZhSubmitted] = useState(false);
+  // Каракол: отдельная коллекция, следует календарю сверху
+  const [kDay, setKDay] = useState(emptyKarakolDay());
+  const [kLoading, setKLoading] = useState(true);
+  const [karakolSub, setKarakolSub] = useState("prigorodnoe");
 
   // лёгкая отдельная подписка только на статус Жашылчи (для строки статусов
   // на вкладке «Для ОТЛ») — сами заказы сюда не подтягиваются, контур отдельный
@@ -150,6 +396,21 @@ export default function ShipmentApp() {
     );
     return unsub;
   }, []);
+
+  // Каракол: подписка на выбранную дату (нужна и вкладке «Каракол»,
+  // и строке статусов на вкладке «Для ОТЛ»)
+  useEffect(() => {
+    setKLoading(true);
+    const unsub = subscribeToKarakolDay(
+      date,
+      (data) => {
+        setKDay(data);
+        setKLoading(false);
+      },
+      () => setKLoading(false)
+    );
+    return unsub;
+  }, [date]);
 
   // подписка в реальном времени — если склад или ОТЛ поменяли что-то,
   // все остальные видят это без перезагрузки
@@ -180,17 +441,8 @@ export default function ShipmentApp() {
     setTimeout(() => setToast(null), 2800);
   };
 
-  const duplicateOrders = useMemo(() => {
-    const counts = {};
-    WAREHOUSES.forEach((w) => {
-      (day[`rows_${w.id}`] || []).forEach((r) => {
-        const key = r.order.trim().toLowerCase();
-        if (!key) return;
-        counts[key] = (counts[key] || 0) + 1;
-      });
-    });
-    return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
-  }, [day]);
+  const duplicateOrders = useMemo(() => findDuplicateOrders(WAREHOUSES, day), [day]);
+  const karakolDuplicateOrders = useMemo(() => findDuplicateOrders(KARAKOL_WAREHOUSES, kDay), [kDay]);
 
   // ---- склад: строки заказов (debounce перед записью в Firestore) ----
   // отдельный таймер на каждую цель сохранения (по складу + отдельно для машин) —
@@ -217,10 +469,7 @@ export default function ShipmentApp() {
     patchWarehouseRows(whId, (rows) =>
       rows.map((r) => {
         if (r.id !== rowId) return r;
-        let v = value;
-        if (field === "pallets" || field === "rolls" || field === "euro" || field === "american" || field === "boxes") v = sanitizeQty(value);
-        if (field === "weight") v = sanitizeWeight(value);
-        return { ...r, [field]: v };
+        return { ...r, [field]: sanitizeField(field, value) };
       })
     );
   };
@@ -231,24 +480,8 @@ export default function ShipmentApp() {
 
   const submitWarehouse = async (whId) => {
     const wh = WAREHOUSES.find((w) => w.id === whId);
-    const qtyMode = wh.qtyMode || "default";
-    const rows = (day[`rows_${whId}`] || []).filter((r) => rowIssues(r, wh.requiresWeight, qtyMode, wh.perOrderCategory).hasData);
-    if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
-    const incompleteCount = rows.filter((r) => rowIssues(r, wh.requiresWeight, qtyMode, wh.perOrderCategory).incomplete).length;
-    if (incompleteCount > 0) {
-      return showToast(
-        incompleteCount === 1
-          ? "Одна строка заполнена не полностью — проверьте подсвеченные поля"
-          : `${incompleteCount} строк заполнены не полностью — проверьте подсвеченные поля`
-      );
-    }
-    const hasDupe = rows.some((r) => duplicateOrders.has(r.order.trim().toLowerCase()));
-    if (hasDupe) return showToast("Есть повторяющиеся номера заказов — исправьте перед отправкой");
-
-    const dupStores = findDuplicateStores(rows);
-    const hasDupeStore = rows.some((r) => dupStores.has(r.store.trim().toLowerCase()));
-    if (hasDupeStore) return showToast("На один магазин может быть только один заказ — исправьте повторяющиеся магазины");
-
+    const err = submitCheck(wh, day[`rows_${whId}`] || [], duplicateOrders);
+    if (err) return showToast(err);
     try {
       await setSubmitted(date, whId, true);
       showToast(`${wh.name}: данные отправлены в транспортный отдел`);
@@ -257,6 +490,41 @@ export default function ShipmentApp() {
     }
   };
   const unlockWarehouse = (whId) => setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
+
+  // ---- Каракол: строки заказов (свой debounce-таймер на каждый склад) ----
+  const patchKarakolRows = useCallback(
+    (whId, updater) => {
+      setKDay((current) => {
+        const nextRows = updater(current[`rows_${whId}`] || []);
+        const next = { ...current, [`rows_${whId}`]: nextRows };
+        const key = `k_rows_${whId}`;
+        if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+        saveTimers.current[key] = setTimeout(() => {
+          saveKarakolRows(date, whId, nextRows).catch(() => showToast("Не удалось сохранить — проверьте связь"));
+        }, 500);
+        return next;
+      });
+    },
+    [date]
+  );
+  const updateKarakolRow = (whId, rowId, field, value) =>
+    patchKarakolRows(whId, (rows) => rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)));
+  const addKarakolRow = (whId) => patchKarakolRows(whId, (rows) => [...rows, makeEmptyRow()]);
+  const removeKarakolRow = (whId, rowId) =>
+    patchKarakolRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
+
+  const submitKarakol = async (whId) => {
+    const wh = WAREHOUSES.find((w) => w.id === whId);
+    const err = submitCheck(wh, kDay[`rows_${whId}`] || [], karakolDuplicateOrders);
+    if (err) return showToast(err);
+    try {
+      await setKarakolSubmitted(date, whId, true);
+      showToast(`Каракол · ${wh.name}: данные отправлены в транспортный отдел`);
+    } catch {
+      showToast("Не удалось отправить — проверьте связь и попробуйте снова");
+    }
+  };
+  const unlockKarakol = (whId) => setKarakolSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
   // ---- ОТЛ: транспорт ----
   const patchVehicles = useCallback(
@@ -281,52 +549,9 @@ export default function ShipmentApp() {
   const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
 
-  const consolidated = useMemo(() => {
-    const rows = [];
-    WAREHOUSES.forEach((w) => {
-      if (!day[`submitted_${w.id}`]) return;
-      const qtyMode = w.qtyMode || "default";
-      (day[`rows_${w.id}`] || []).forEach((r) => {
-        if (!r.order.trim()) return;
-        const weight = w.requiresWeight ? parseFloat(r.weight) || 0 : null;
-
-        let pallets = null, rolls = null, euro = null, american = null, boxes = null, total;
-
-        if (qtyMode === "euroAmerican") {
-          euro = parseInt(r.euro, 10) || 0;
-          american = parseInt(r.american, 10) || 0;
-          total = Math.ceil((euro + american * EURO_AMERICAN_COEF) * 100) / 100;
-        } else if (qtyMode === "palletsBoxes") {
-          pallets = parseInt(r.pallets, 10) || 0;
-          boxes = parseInt(r.boxes, 10) || 0;
-          total = Math.ceil((pallets + boxesToPallets(boxes)) * 100) / 100;
-        } else if (qtyMode === "palletsAmericanBoxes") {
-          pallets = parseInt(r.pallets, 10) || 0;
-          american = parseInt(r.american, 10) || 0;
-          boxes = parseInt(r.boxes, 10) || 0;
-          total = Math.ceil((pallets + american * EURO_AMERICAN_COEF + boxesToPallets(boxes)) * 100) / 100;
-        } else {
-          pallets = parseInt(r.pallets, 10) || 0;
-          rolls = parseInt(r.rolls, 10) || 0;
-          total = Math.ceil((pallets + rolls * COEFFICIENT) * 100) / 100;
-        }
-
-        const fallbackWeight = (qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes") ? total * PALLET_KG : (pallets || 0) * PALLET_KG + (rolls || 0) * ROLL_KG;
-        const unloadSec = w.unloadPerPalletSec || PALLET_UNLOAD_SEC;
-
-        rows.push({
-          id: r.id, warehouse: w.name, shipPoint: w.shipPoint, accent: w.accent,
-          order: r.order.trim(), store: r.store || "—",
-          pallets, rolls, euro, american, boxes,
-          weight: weight === null ? Math.round(fallbackWeight * 100) / 100 : Math.round(weight * 100) / 100,
-          total,
-          unloadSec,
-          group: w.perOrderCategory ? (r.category || "") : (GROUP_BY_WAREHOUSE[w.id] || ""),
-        });
-      });
-    });
-    return rows;
-  }, [day]);
+  const consolidated = useMemo(() => consolidateRows(WAREHOUSES, day), [day]);
+  const karakolConsolidated = useMemo(() => consolidateRows(KARAKOL_WAREHOUSES, kDay), [kDay]);
+  const karakolTransfers = useMemo(() => buildKarakolTransfers(date, karakolConsolidated), [date, karakolConsolidated]);
 
   const exportExcel = () => {
     if (consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
@@ -334,6 +559,12 @@ export default function ShipmentApp() {
     if (readyCount === 0) return showToast("Сначала проставьте готовность хотя бы одного ТС на вкладке «Транспорт»");
     downloadWorkbook(date, consolidated, day.vehicles);
     showToast("Файл сформирован и скачан");
+  };
+
+  const exportKarakol = () => {
+    if (karakolConsolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов Каракола");
+    downloadKarakolWorkbook(date, karakolConsolidated);
+    showToast("Файл Каракола сформирован и скачан");
   };
 
   const tabLabel = (id) => (id === "otl" ? "Для ОТЛ" : WAREHOUSES.find((w) => w.id === id)?.name);
@@ -369,10 +600,11 @@ export default function ShipmentApp() {
           {TABS.map((id) => {
             const isOtl = id === "otl";
             const isZh = id === "zhashylcha";
-            const w = !isOtl && !isZh ? WAREHOUSES.find((x) => x.id === id) : null;
-            const a = w ? ACCENT[w.accent] : isZh ? ACCENT.cyan : null;
+            const isK = id === "karakol";
+            const w = !isOtl && !isZh && !isK ? WAREHOUSES.find((x) => x.id === id) : null;
+            const a = w ? ACCENT[w.accent] : isZh ? ACCENT.cyan : isK ? ACCENT.fuchsia : null;
             const active = activeTab === id;
-            const sub = !isOtl && !isZh && day[`submitted_${id}`];
+            const sub = !isOtl && !isZh && !isK && day[`submitted_${id}`];
             return (
               <button
                 key={id}
@@ -381,8 +613,8 @@ export default function ShipmentApp() {
                   active ? "bg-stone-50 text-stone-900" : "text-stone-500 hover:text-stone-700"
                 }`}
               >
-                {isOtl ? <Truck size={14} /> : isZh ? <Moon size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
-                {isZh ? ZH_DISPLAY_NAME : tabLabel(id)}
+                {isOtl ? <Truck size={14} /> : isZh ? <Moon size={14} /> : isK ? <Mountain size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
+                {isZh ? ZH_DISPLAY_NAME : isK ? "Каракол" : tabLabel(id)}
                 {sub && <Lock size={12} className="text-stone-400" />}
                 {active && <span className={`absolute left-0 right-0 -bottom-px h-0.5 ${isOtl ? "bg-stone-800" : a.bg}`} />}
               </button>
@@ -394,6 +626,23 @@ export default function ShipmentApp() {
       <div className="max-w-6xl mx-auto px-6 py-6">
         {activeTab === "zhashylcha" ? (
           <ZhashylchaPanel date={date} />
+        ) : activeTab === "karakol" ? (
+          <KarakolPanel
+            kDay={kDay}
+            loading={kLoading}
+            sub={karakolSub}
+            onSubChange={setKarakolSub}
+            duplicateOrders={karakolDuplicateOrders}
+            onUpdate={updateKarakolRow}
+            onAdd={addKarakolRow}
+            onRemove={removeKarakolRow}
+            onSubmit={submitKarakol}
+            onUnlock={unlockKarakol}
+            consolidated={karakolConsolidated}
+            transfers={karakolTransfers}
+            onExport={exportKarakol}
+            dateLabel={fmtDateRu(date)}
+          />
         ) : loadingDay ? (
           <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
             <Loader2 size={16} className="animate-spin" /> Загрузка данных за {fmtDateRu(date)}…
@@ -422,6 +671,7 @@ export default function ShipmentApp() {
             onExport={exportExcel}
             dateLabel={fmtDateRu(date)}
             zhSubmitted={zhSubmitted}
+            karakolDay={kDay}
           />
         )}
       </div>
@@ -434,12 +684,11 @@ export default function ShipmentApp() {
     </div>
   );
 }
-
 // ---------------------------------------------------------------------------
 // Вкладка склада
 // ---------------------------------------------------------------------------
 
-function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel }) {
+function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад" }) {
   const a = ACCENT[wh.accent];
   const requiresWeight = Boolean(wh.requiresWeight);
   const requiresCategory = Boolean(wh.perOrderCategory);
@@ -457,10 +706,10 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
       <div className="flex items-center justify-between mb-4">
         <div>
           <div className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${a.text} mb-1`}>
-            <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Склад · {wh.name}
+            <span className={`h-2 w-2 rounded-full ${a.dot}`} /> {prefix} · {wh.name}
           </div>
           <p className="text-sm text-stone-500">
-            Заказ №, {qtyDescription}{requiresWeight ? ", вес" : ""}{requiresCategory ? ", товарная категория" : ""} на {dateLabel}. Магазин выбирается из списка.
+            Заказ №, {qtyDescription}{requiresWeight ? ", вес" : ""}{requiresCategory ? ", товарная категория" : ""} на {dateLabel}. Магазин выбирается из списка (можно искать по номеру или названию).
             {(qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes") && " Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее)."}
             {qtyMode === "palletsAmericanBoxes" && " Вес считается автоматически, вручную вводить не нужно."}
           </p>
@@ -535,16 +784,11 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                     {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
                   </td>
                   <td className="px-4 py-2">
-                    <select
+                    <StoreSelect
                       disabled={submitted} value={r.store}
-                      onChange={(e) => onUpdate(r.id, "store", e.target.value)}
-                      className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingStore || isDupeStore ? errBorder : okBorder}`}
-                    >
-                      <option value="">— выбрать магазин —</option>
-                      {STORES.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
+                      onChange={(v) => onUpdate(r.id, "store", v)}
+                      hasError={Boolean(issues.missingStore || isDupeStore)}
+                    />
                     {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
                     {!issues.missingStore && isDupeStore && <div className="text-xs text-rose-600 mt-1">На этот магазин уже есть заказ в списке — проверьте дубли</div>}
                   </td>
@@ -704,12 +948,16 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
     </div>
   );
 }
-
 // ---------------------------------------------------------------------------
 // Вкладка ОТЛ
 // ---------------------------------------------------------------------------
 
-function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhSubmitted }) {
+// Переиспользуется и для Каракола: warehouses = склады Каракола, showTransport = false
+// (раздела «Транспорт» там нет), transfers — предпросмотр перемещений РЦ → РЦ Каракол.
+function OtlPanel({
+  day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhSubmitted,
+  karakolDay = null, warehouses = WAREHOUSES, showTransport = true, transfers = null, titlePrefix = "",
+}) {
   const totalPallets = consolidated.reduce((s, r) => s + r.total, 0);
   const totalWeight = consolidated.reduce((s, r) => s + r.weight, 0);
   const [editingCapacity, setEditingCapacity] = useState({});
@@ -718,8 +966,8 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
   return (
     <div className="space-y-8">
       <div className="bg-white border border-stone-200 rounded-xl px-4 py-3 flex items-center gap-6 flex-wrap">
-        <span className="text-xs font-bold uppercase tracking-wide text-stone-400">Статус складов</span>
-        {WAREHOUSES.map((w) => {
+        <span className="text-xs font-bold uppercase tracking-wide text-stone-400">{titlePrefix ? `Статус складов · ${titlePrefix}` : "Статус складов"}</span>
+        {warehouses.map((w) => {
           const sub = day[`submitted_${w.id}`];
           const a = ACCENT[w.accent];
           return (
@@ -730,18 +978,37 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
             </div>
           );
         })}
-        <div className="flex items-center gap-1.5 text-sm font-medium border-l border-stone-200 pl-6">
-          {zhSubmitted ? <CheckCircle2 size={15} className="text-cyan-700" /> : <Circle size={15} className="text-stone-300" />}
-          <span className={zhSubmitted ? "text-stone-900" : "text-stone-400"}>РЦ Жашылча - молочка (ночь)</span>
-          <span className={`text-xs ${zhSubmitted ? "text-cyan-700" : "text-stone-400"}`}>{zhSubmitted ? "отправлено" : "ожидание"}</span>
-        </div>
+        {zhSubmitted !== undefined && (
+          <div className="flex items-center gap-1.5 text-sm font-medium border-l border-stone-200 pl-6">
+            {zhSubmitted ? <CheckCircle2 size={15} className="text-cyan-700" /> : <Circle size={15} className="text-stone-300" />}
+            <span className={zhSubmitted ? "text-stone-900" : "text-stone-400"}>РЦ Жашылча - молочка (ночь)</span>
+            <span className={`text-xs ${zhSubmitted ? "text-cyan-700" : "text-stone-400"}`}>{zhSubmitted ? "отправлено" : "ожидание"}</span>
+          </div>
+        )}
+        {karakolDay && (
+          <div className="w-full flex items-center gap-6 flex-wrap border-t border-stone-100 pt-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-fuchsia-700">
+              <Mountain size={13} /> Каракол
+            </span>
+            {KARAKOL_WAREHOUSES.map((w) => {
+              const sub = karakolDay[`submitted_${w.id}`];
+              return (
+                <div key={w.id} className="flex items-center gap-1.5 text-sm font-medium">
+                  {sub ? <CheckCircle2 size={15} className="text-fuchsia-700" /> : <Circle size={15} className="text-stone-300" />}
+                  <span className={sub ? "text-stone-900" : "text-stone-400"}>{w.name}</span>
+                  <span className={`text-xs ${sub ? "text-fuchsia-700" : "text-stone-400"}`}>{sub ? "отправлено" : "ожидание"}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div>
         <div className="flex items-center justify-between mb-3">
           <div>
             <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
-              Консолидировано на {dateLabel} · {consolidated.length} заказ(ов)
+              {titlePrefix ? `${titlePrefix} · ` : ""}Консолидировано на {dateLabel} · {consolidated.length} заказ(ов)
             </h2>
             <p className="text-xs text-stone-400 mt-0.5">
               Итого: паллеты + роллкейджи × {COEFFICIENT} (Садыгалиева-сыпучка — евро + американцы × {EURO_AMERICAN_COEF}; Заморозка/Хлебзавод/ККЦП — паллеты + коробки по ступеням 20/40) ·
@@ -814,6 +1081,55 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
         </div>
       </div>
 
+      {transfers && (
+        <div>
+          <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-1">
+            Перемещения РЦ → {KARAKOL_POINT} · {transfers.length} шт.
+          </h2>
+          <p className="text-xs text-stone-400 mb-3">
+            Добавляются в выгрузку автоматически — по одному на склад с отправленными заказами. Номер: 003 + ддммгггг + номер склада
+            (Пригородное 1, Ак-Орго 2, ПТО 3, Садыгалиева-сыпучка 4). Кол-во ГМ — сумма «Итого» склада, вес — сумма весов.
+          </p>
+          <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+                  <th className="text-left font-semibold px-4 py-3">Номер</th>
+                  <th className="text-left font-semibold px-4 py-3">Откуда</th>
+                  <th className="text-left font-semibold px-4 py-3">Куда</th>
+                  <th className="text-right font-semibold px-4 py-3">Заказов</th>
+                  <th className="text-right font-semibold px-4 py-3">Кол-во ГМ</th>
+                  <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
+                  <th className="text-left font-semibold px-4 py-3">Группа</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transfers.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-stone-400">
+                      Пока ни один склад не отправил заказы — перемещения не создаются.
+                    </td>
+                  </tr>
+                ) : (
+                  transfers.map((t) => (
+                    <tr key={t.whId} className="border-t border-stone-100">
+                      <td className="px-4 py-2 font-mono">{t.order}</td>
+                      <td className="px-4 py-2 text-stone-700">{t.shipPoint}</td>
+                      <td className="px-4 py-2 text-stone-700">{t.store}</td>
+                      <td className="px-4 py-2 text-right font-mono text-stone-600">{t.ordersCount}</td>
+                      <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{t.total}</td>
+                      <td className="px-4 py-2 text-right font-mono text-stone-600">{t.weight}</td>
+                      <td className="px-4 py-2 text-stone-600">{t.group}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {showTransport && (
       <div>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">Транспорт на {dateLabel}</h2>
@@ -934,10 +1250,95 @@ function OtlPanel({ day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVe
           </button>
         </div>
       </div>
+      )}
     </div>
   );
 }
 
+// ---------------------------------------------------------------------------
+// Каракол: одна вкладка с подвкладками (4 склада + «Для ОТЛ (Каракол)»).
+// Формы, коэффициенты, время разгрузки и товарные группы — как у основных
+// складов; данные в отдельной коллекции; раздела «Транспорт» нет.
+// ---------------------------------------------------------------------------
+
+function KarakolPanel({
+  kDay, loading, sub, onSubChange, duplicateOrders,
+  onUpdate, onAdd, onRemove, onSubmit, onUnlock,
+  consolidated, transfers, onExport, dateLabel,
+}) {
+  const wh = KARAKOL_WAREHOUSES.find((w) => w.id === sub);
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-fuchsia-50 border border-fuchsia-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-fuchsia-800">
+        <Mountain size={14} />
+        Каракол: заказы магазинов Каракола на {dateLabel}. Отдельные данные, отдельная выгрузка (только лист Orders, точка отгрузки — {KARAKOL_POINT}).
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {KARAKOL_WAREHOUSES.map((w) => {
+          const a = ACCENT[w.accent];
+          const active = sub === w.id;
+          const submitted = kDay[`submitted_${w.id}`];
+          return (
+            <button
+              key={w.id}
+              onClick={() => onSubChange(w.id)}
+              className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
+                active ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
+              }`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${submitted ? a.dot : "bg-stone-300"}`} />
+              {w.name}
+              {submitted && <Lock size={12} className={active ? "text-stone-300" : "text-stone-400"} />}
+            </button>
+          );
+        })}
+        <button
+          onClick={() => onSubChange("otl")}
+          className={`flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
+            sub === "otl" ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
+          }`}
+        >
+          <Truck size={14} /> Для ОТЛ (Каракол)
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
+          <Loader2 size={16} className="animate-spin" /> Загрузка данных Каракола за {dateLabel}…
+        </div>
+      ) : sub === "otl" ? (
+        <OtlPanel
+          day={kDay}
+          consolidated={consolidated}
+          onExport={onExport}
+          dateLabel={dateLabel}
+          warehouses={KARAKOL_WAREHOUSES}
+          showTransport={false}
+          transfers={transfers}
+          titlePrefix="Каракол"
+        />
+      ) : (
+        <WarehousePanel
+          key={sub}
+          wh={wh}
+          prefix="Каракол"
+          rows={kDay[`rows_${sub}`] || []}
+          submitted={kDay[`submitted_${sub}`]}
+          duplicateOrders={duplicateOrders}
+          onUpdate={(rowId, field, value) => onUpdate(sub, rowId, field, value)}
+          onPasteQty={(rowId, field, raw) => onUpdate(sub, rowId, field, sanitizeQty(raw))}
+          onAdd={() => onAdd(sub)}
+          onRemove={(rowId) => onRemove(sub, rowId)}
+          onSubmit={() => onSubmit(sub)}
+          onUnlock={() => onUnlock(sub)}
+          dateLabel={dateLabel}
+        />
+      )}
+    </div>
+  );
+}
 // ---------------------------------------------------------------------------
 // Жашылча (ночь) — полностью отдельный контур: свой склад, свой список ТС,
 // своя выгрузка, всегда на сегодняшнюю дату (заказы подаются день в день)
@@ -1211,16 +1612,11 @@ function ZhashylchaPanel({ date }) {
                       {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
                     </td>
                     <td className="px-4 py-2">
-                      <select
+                      <StoreSelect
                         disabled={!isToday || zhDay.submitted} value={r.store}
-                        onChange={(e) => updateRow(r.id, "store", e.target.value)}
-                        className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingStore || isDupeStore ? errBorder : okBorder}`}
-                      >
-                        <option value="">— выбрать магазин —</option>
-                        {STORES.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
-                      </select>
+                        onChange={(v) => updateRow(r.id, "store", v)}
+                        hasError={Boolean(issues.missingStore || isDupeStore)}
+                      />
                       {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
                       {!issues.missingStore && isDupeStore && <div className="text-xs text-rose-600 mt-1">На этот магазин уже есть заказ — проверьте дубли</div>}
                     </td>
