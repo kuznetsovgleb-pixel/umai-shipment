@@ -91,11 +91,26 @@ export function downloadZhashylchaWorkbook(dateIso, consolidated, vehicles) {
 //  1) заказы магазинов Каракола: точка отгрузки = "РЦ Каракол";
 //  2) перемещения "РЦ склада → РЦ Каракол" — по одному на склад, у которого
 //     есть отправленные заказы. Номер: "003" + ддммгггг + номер склада
-//     (Пригородное 1, Ак-Орго 2, ПТО 3, Садыгалиева-сыпучка 4) — номер
+//     (Пригородное 1, Ак-Орго 2, ПТО 3, Садыгалиева-сыпучка 4, Транзит Север 5) — номер
 //     склада фиксированный, не зависит от того, у кого есть заказы в этот день.
 // ---------------------------------------------------------------------------
 
 const round2 = (x) => Math.round(x * 100) / 100;
+
+// товарная группа перемещения: у большинства складов она одна на склад; у Транзита
+// категория выбирается по каждому заказу — берём ту, на которую приходится больше паллет
+const pickGroup = (rows) => {
+  const sums = {};
+  rows.forEach((r) => {
+    const g = r.group || "";
+    sums[g] = (sums[g] || 0) + r.total;
+  });
+  let best = "", bestSum = -1;
+  Object.keys(sums).forEach((g) => {
+    if (sums[g] > bestSum) { best = g; bestSum = sums[g]; }
+  });
+  return best;
+};
 
 export function buildKarakolTransfers(dateIso, consolidated) {
   const dateSuffix = fmtDateCompact(dateIso);
@@ -113,7 +128,7 @@ export function buildKarakolTransfers(dateIso, consolidated) {
       total: round2(rows.reduce((s, r) => s + r.total, 0)),
       weight: round2(rows.reduce((s, r) => s + r.weight, 0)),
       unloadSec: rows[0].unloadSec,
-      group: rows[0].group || "",
+      group: pickGroup(rows),
     });
   });
   return transfers;
