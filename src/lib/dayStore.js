@@ -226,7 +226,22 @@ export function subscribeToKarakolDay(date, onChange, onError) {
     karakolRef(date),
     (snap) => {
       if (snap.exists()) {
-        onChange(snap.data());
+        const data = snap.data();
+        // если в документе нет полей какого-то склада (например, склад добавили
+        // позже, чем создали этот день) — досоздаём только недостающие поля
+        const patch = {};
+        KARAKOL_WAREHOUSE_IDS.forEach((id) => {
+          if (!Array.isArray(data[`rows_${id}`])) patch[`rows_${id}`] = [makeEmptyRow()];
+          if (typeof data[`submitted_${id}`] !== "boolean") patch[`submitted_${id}`] = false;
+        });
+        if (Object.keys(patch).length > 0) {
+          setDoc(karakolRef(date), patch, { merge: true }).catch((err) =>
+            console.error("[dayStore] karakol backfill failed for", date, err)
+          );
+          onChange({ ...data, ...patch });
+        } else {
+          onChange(data);
+        }
       } else {
         const seed = emptyKarakolDay();
         setDoc(karakolRef(date), seed, { merge: true }).catch((err) =>
