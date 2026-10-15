@@ -247,6 +247,7 @@ export const STORES = [
 export const KARAKOL_STORES = [
   "Глобус30", "Глобус43", "Глобус53", "Глобус58", "Глобус60", "Глобус64", "Глобус98",
   "Достор14", "Достор17", "Достор20", "Достор23", "Достор26", "Достор40",
+  "Бактуу Долоноту",
 ];
 export const STORES_NO_KARAKOL = STORES.filter((s) => !KARAKOL_STORES.includes(s));
 
