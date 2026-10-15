@@ -168,3 +168,36 @@ export function downloadKarakolWorkbook(dateIso, consolidated) {
   const wb = buildKarakolWorkbook(dateIso, consolidated);
   XLSX.writeFile(wb, `TMS_import_karakol_${dateIso}.xlsx`);
 }
+
+// ---------------------------------------------------------------------------
+// Холод Юг — стандартная выгрузка, но только лист Orders (без Vehicles и Магазины).
+// Точка отгрузки — склад заказа (РЦ Садыгалиева - заморозка / РЦ Жашылча),
+// дата — дата отгрузки, выбранная на вкладке «Холод Юг».
+// ---------------------------------------------------------------------------
+
+export function buildHolodYugWorkbook(dateIso, consolidated) {
+  const dateLabel = fmtDateRu(dateIso);
+  const dateSuffix = fmtDateCompact(dateIso);
+
+  const ordersHeader = [
+    "Номер заказа *", "Дата доставки*", "Наименование точки отгрузки*", "Наименование точки доставки*",
+    "Кол-во ГМ", "Тип ГМ", "Вес (брутто), кг",
+    "Время на разгрузку, сек (на единицу груза)", "Время на разгрузку, сек (на точку)",
+    "Товарная группа",
+  ];
+  const ordersRows = consolidated.map((r) => [
+    `${r.order}_${dateSuffix}`, dateLabel, r.shipPoint, r.store,
+    r.total, "Паллета", r.weight,
+    r.unloadSec, POINT_UNLOAD_SEC,
+    r.group || "",
+  ]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([ordersHeader, ...ordersRows]), "Orders");
+  return wb;
+}
+
+export function downloadHolodYugWorkbook(dateIso, consolidated) {
+  const wb = buildHolodYugWorkbook(dateIso, consolidated);
+  XLSX.writeFile(wb, `TMS_import_holod_yug_${dateIso}.xlsx`);
+}
