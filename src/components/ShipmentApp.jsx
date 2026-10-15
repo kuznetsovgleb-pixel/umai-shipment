@@ -4,7 +4,7 @@ import {
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
   Snowflake, Upload, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
@@ -14,7 +14,7 @@ import {
 import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook } from "../lib/exportExcel";
 import {
   YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort,
-  collapseYugRows, parseYugFile,
+  collapseYugRows, parseYugFile, yugPallets,
 } from "../lib/yug";
 
 const ACCENT = {
@@ -234,19 +234,25 @@ const consolidateRows = (warehouses, dayData) => {
 // ---------------------------------------------------------------------------
 
 const YUG_SAG_WH = WAREHOUSES.find((w) => w.id === "sagadalieva_zamorozka");
+const YUG_TR_NAME = "Транзит Юг";
+const YUG_TR_SHIP_POINT = "РЦ Транзит Юг";
+const YUG_TR_CATEGORIES = ["Заморозка", "Охлажденка"];
 const YUG_STATUS_WHS = [
   { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose" },
   { id: "zhashylcha", name: YUG_ZH_NAME, accent: "cyan" },
+  { id: "transit_yug", name: YUG_TR_NAME, accent: "teal" },
 ];
 
 const yugHasData = (r) => Boolean(String(r.order || "").trim() || r.store || r.weight || r.volume);
-const yugIssues = (r) => {
-  const hasData = yugHasData(r);
-  if (!hasData) return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, incomplete: false };
+// needsCategory — для Транзит Юга: у каждого заказа выбирается товарная группа
+const yugIssues = (r, needsCategory = false) => {
+  const hasData = yugHasData(r) || Boolean(r.category);
+  if (!hasData) return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, missingCategory: false, incomplete: false };
   const missingOrder = !String(r.order || "").trim();
   const missingStore = !r.store;
   const missingQty = !(parseFloat(r.weight) > 0) && !(parseFloat(r.volume) > 0);
-  return { hasData: true, missingOrder, missingStore, missingQty, incomplete: missingOrder || missingStore || missingQty };
+  const missingCategory = needsCategory && !r.category;
+  return { hasData: true, missingOrder, missingStore, missingQty, missingCategory, incomplete: missingOrder || missingStore || missingQty || missingCategory };
 };
 
 // повторная загрузка файла: заказы с тем же номером обновляются, новые добавляются,
@@ -291,6 +297,19 @@ const buildYugConsolidated = (yDay) => {
       });
     });
   }
+  if (yDay.submitted_transit_yug) {
+    collapseYugRows(yDay.rows_transit_yug || []).forEach((g) => {
+      list.push({
+        id: g.key, whId: "transit_yug", warehouse: YUG_TR_NAME, shipPoint: YUG_TR_SHIP_POINT, accent: "teal",
+        order: g.order, store: g.store || "—",
+        pallets: g.pallets, rolls: null, euro: null, american: null, boxes: null,
+        weight: Math.round(g.weight * 100) / 100,
+        total: g.pallets,
+        unloadSec: PALLET_UNLOAD_SEC,
+        group: g.category || "",
+      });
+    });
+  }
   return list;
 };
 
@@ -304,13 +323,13 @@ const buildYugConsolidated = (yDay) => {
 const normName = (s) => s.toLowerCase().replace(/ё/g, "е");
 const squash = (s) => normName(s).replace(/[\s\-_.()]/g, "");
 
-const searchStores = (query) => {
+const searchStores = (query, list) => {
   const raw = normName(query).trim();
-  if (!raw) return STORES;
+  if (!raw) return list;
   const q = squash(raw);
   const tokens = raw.split(/\s+/);
   const scored = [];
-  STORES.forEach((s) => {
+  list.forEach((s) => {
     const sq = squash(s);
     const lower = normName(s);
     let rank = -1;
@@ -327,7 +346,8 @@ const searchStores = (query) => {
   return scored.sort((a, b) => a.rank - b.rank).map((x) => x.s);
 };
 
-function StoreSelect({ value, onChange, disabled, hasError }) {
+// stores — список для выбора: по умолчанию все магазины, кроме магазинов Каракола
+function StoreSelect({ value, onChange, disabled, hasError, stores = STORES_NO_KARAKOL }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [hi, setHi] = useState(0);
@@ -336,9 +356,9 @@ function StoreSelect({ value, onChange, disabled, hasError }) {
   const listRef = useRef(null);
 
   const items = useMemo(() => {
-    const found = searchStores(query);
+    const found = searchStores(query, stores);
     return query === "" && value ? ["", ...found] : found;
-  }, [query, value]);
+  }, [query, value, stores]);
 
   const updatePos = useCallback(() => {
     const el = inputRef.current;
@@ -444,7 +464,7 @@ function StoreSelect({ value, onChange, disabled, hasError }) {
       )}
     </div>
   );
-}
+} 
 
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
@@ -673,6 +693,38 @@ export default function ShipmentApp() {
   const removeYugZh = (rowId) =>
     patchYugRows("zhashylcha", (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
 
+  // Транзит Юг (Холод Юг): вручную — номер, магазин, вес, объём, товарная группа
+  const updateYugTr = (rowId, field, value) =>
+    patchYugRows("transit_yug", (rows) =>
+      rows.map((r) => {
+        if (r.id !== rowId) return r;
+        const v = field === "weight" || field === "volume" ? sanitizeWeight(value) : value;
+        return { ...r, [field]: v };
+      })
+    );
+  const addYugTr = () => patchYugRows("transit_yug", (rows) => [...rows, makeEmptyYugRow()]);
+  const removeYugTr = (rowId) =>
+    patchYugRows("transit_yug", (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
+  const submitYugTr = async () => {
+    const rows = (yDay.rows_transit_yug || []).filter((r) => yugIssues(r, true).hasData);
+    if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
+    const bad = rows.filter((r) => yugIssues(r, true).incomplete).length;
+    if (bad > 0) return showToast(bad === 1 ? "Одна строка заполнена не полностью — проверьте подсвеченные поля" : `${bad} строк заполнены не полностью — проверьте подсвеченные поля`);
+    const seen = new Set();
+    for (const r of rows) {
+      const k = r.order.trim().toLowerCase();
+      if (seen.has(k)) return showToast("Есть повторяющиеся номера заказов — исправьте перед отправкой");
+      seen.add(k);
+    }
+    try {
+      await setHolodYugSubmitted(yDate, "transit_yug", true);
+      showToast("Холод Юг · Транзит Юг: данные отправлены в транспортный отдел");
+    } catch {
+      showToast("Не удалось отправить — проверьте связь и попробуйте снова");
+    }
+  };
+  const unlockYugTr = () => setHolodYugSubmitted(yDate, "transit_yug", false).catch(() => showToast("Не удалось изменить статус"));
+
   const loadYugFile = async (file) => {
     if (!file) return;
     let buf;
@@ -846,6 +898,10 @@ export default function ShipmentApp() {
               onUpdate: updateYugZh, onAdd: addYugZh, onRemove: removeYugZh,
               onSubmit: submitYugZh, onUnlock: unlockYugZh, onFile: loadYugFile,
             }}
+            tr={{
+              onUpdate: updateYugTr, onAdd: addYugTr, onRemove: removeYugTr,
+              onSubmit: submitYugTr, onUnlock: unlockYugTr,
+            }}
             consolidated={yugConsolidated}
             onExport={exportYug}
           />
@@ -914,7 +970,7 @@ export default function ShipmentApp() {
 // Вкладка склада
 // ---------------------------------------------------------------------------
 
-function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад" }) {
+function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад", stores }) {
   const a = ACCENT[wh.accent];
   const requiresWeight = Boolean(wh.requiresWeight);
   const requiresCategory = Boolean(wh.perOrderCategory);
@@ -1011,7 +1067,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                   </td>
                   <td className="px-4 py-2">
                     <StoreSelect
-                      disabled={submitted} value={r.store}
+                      disabled={submitted} value={r.store} stores={stores}
                       onChange={(v) => onUpdate(r.id, "store", v)}
                       hasError={Boolean(issues.missingStore || isDupeStore)}
                     />
@@ -1568,6 +1624,7 @@ function KarakolPanel({
           key={sub}
           wh={wh}
           prefix="Каракол"
+          stores={KARAKOL_STORES}
           rows={kDay[`rows_${sub}`] || []}
           submitted={kDay[`submitted_${sub}`]}
           duplicateOrders={duplicateOrders}
@@ -2096,8 +2153,8 @@ function ZhashylchaPanel({ date }) {
 }
 
 // ---------------------------------------------------------------------------
-// Холод Юг: своя дата отгрузки (пн, ср, сб) и 3 подвкладки —
-// Садыгалиева (заморозка), Жашылча (загрузка из файла 1С), Для ОТЛ
+// Холод Юг: своя дата отгрузки (пн, ср, сб) и подвкладки —
+// Садыгалиева (заморозка), Жашылча (загрузка из файла 1С), Транзит Юг, Для ОТЛ
 // ---------------------------------------------------------------------------
 
 function YugDateBar({ date, onChange }) {
@@ -2126,7 +2183,7 @@ function YugDateBar({ date, onChange }) {
   );
 }
 
-function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sag, zh, consolidated, onExport }) {
+function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sag, zh, tr, consolidated, onExport }) {
   const dateLabel = fmtDateRu(date);
   const pill = (active) =>
     `flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
@@ -2135,6 +2192,7 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sa
   const subs = [
     { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose" },
     { id: "zhashylcha", name: YUG_ZH_NAME, accent: "cyan" },
+    { id: "transit_yug", name: YUG_TR_NAME, accent: "teal" },
   ];
 
   return (
@@ -2178,6 +2236,13 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sa
           submitted={yDay.submitted_zhashylcha}
           dateLabel={dateLabel}
           {...zh}
+        />
+      ) : sub === "transit_yug" ? (
+        <YugTransitPanel
+          rows={yDay.rows_transit_yug || []}
+          submitted={yDay.submitted_transit_yug}
+          dateLabel={dateLabel}
+          {...tr}
         />
       ) : (
         <WarehousePanel
@@ -2384,6 +2449,195 @@ function YugZhashylchaPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRem
               <tfoot>
                 <tr className="border-t border-stone-200 bg-stone-50">
                   <td colSpan={3} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(totalWeight * 100) / 100}</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(collapsed.reduce((s, g) => s + g.volume, 0) * 100) / 100}</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{totalPallets}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!submitted && (
+        <div className="flex justify-end">
+          <button onClick={onSubmit} className={`flex items-center gap-2 ${a.bg} text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:opacity-90 transition-opacity shadow-sm`}>
+            <Send size={15} /> Отправить в транспортный отдел
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Холод Юг · Транзит Юг: вручную — номер заказа, магазин, вес, объём, товарная группа
+// (заморозка или охлажденка). Паллеты — как у Жашылчи: до 500 кг и до 1 м³ — одна паллета,
+// больше по весу или объёму — несколько. Заказы одного магазина и одной группы объединяются.
+// ---------------------------------------------------------------------------
+
+function YugTransitPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove, onSubmit, onUnlock }) {
+  const a = ACCENT.teal;
+
+  const dupOrders = useMemo(() => {
+    const counts = {};
+    rows.forEach((r) => {
+      const k = String(r.order || "").trim().toLowerCase();
+      if (k) counts[k] = (counts[k] || 0) + 1;
+    });
+    return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
+  }, [rows]);
+
+  const collapsed = useMemo(() => collapseYugRows(rows), [rows]);
+  const totalPallets = collapsed.reduce((s, g) => s + g.pallets, 0);
+  const totalWeight = collapsed.reduce((s, g) => s + g.weight, 0);
+  const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
+  const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${a.text} mb-1`}>
+          <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Холод Юг · {YUG_TR_NAME}
+        </div>
+        <p className="text-sm text-stone-500">
+          Заказ №, магазин, вес, объём и товарная группа на отгрузку {dateLabel}. Паллеты: до {500} кг и до {1} м³ — одна паллета,
+          больше по весу или объёму — несколько. Заказы одного магазина в одной группе объединяются в один (вес и объём суммируются). Точка отгрузки — {YUG_TR_SHIP_POINT}.
+        </p>
+      </div>
+
+      {submitted && (
+        <div className="flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-stone-700">
+            <Lock size={15} className="text-stone-500" /> Данные на {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
+          </div>
+          <button onClick={onUnlock} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900 whitespace-nowrap">
+            Вернуть на редактирование
+          </button>
+        </div>
+      )}
+
+      <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+              <th className="text-left font-semibold px-4 py-3 w-10">#</th>
+              <th className="text-left font-semibold px-4 py-3 w-44">Заказ №</th>
+              <th className="text-left font-semibold px-4 py-3">Магазин</th>
+              <th className="text-left font-semibold px-4 py-3 w-32">Вес, кг</th>
+              <th className="text-left font-semibold px-4 py-3 w-32">Объём, м³</th>
+              <th className="text-left font-semibold px-4 py-3 w-44">Товарная группа</th>
+              <th className="text-right font-semibold px-4 py-3 w-24">Паллеты</th>
+              <th className="px-4 py-3 w-10" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const issues = yugIssues(r, true);
+              const isDupe = String(r.order || "").trim() && dupOrders.has(r.order.trim().toLowerCase());
+              const rowPallets = parseFloat(r.weight) > 0 || parseFloat(r.volume) > 0 ? yugPallets(r.weight, r.volume) : null;
+              return (
+                <tr key={r.id} className="border-t border-stone-100 align-top">
+                  <td className="px-4 py-2 text-stone-400 font-mono text-xs pt-2.5">{i + 1}</td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" disabled={submitted} value={r.order}
+                      onChange={(e) => onUpdate(r.id, "order", e.target.value)}
+                      placeholder="напр. 100234"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${isDupe || issues.missingOrder ? errBorder : okBorder}`}
+                    />
+                    {isDupe && <div className="text-xs text-rose-600 mt-1">Номер дублируется</div>}
+                    {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <StoreSelect disabled={submitted} value={r.store} onChange={(v) => onUpdate(r.id, "store", v)} hasError={Boolean(issues.missingStore)} />
+                    {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="decimal" disabled={submitted} value={r.weight}
+                      onChange={(e) => onUpdate(r.id, "weight", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="decimal" disabled={submitted} value={r.volume}
+                      onChange={(e) => onUpdate(r.id, "volume", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                    />
+                    {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите вес или объём</div>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <select
+                      disabled={submitted} value={r.category || ""}
+                      onChange={(e) => onUpdate(r.id, "category", e.target.value)}
+                      className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingCategory ? errBorder : okBorder}`}
+                    >
+                      <option value="">— выбрать группу —</option>
+                      {YUG_TR_CATEGORIES.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                    {issues.missingCategory && <div className="text-xs text-rose-600 mt-1">Укажите группу</div>}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono text-stone-600 pt-2.5">{rowPallets ?? "—"}</td>
+                  <td className="px-4 py-2 text-center">
+                    {!submitted && (
+                      <button onClick={() => onRemove(r.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!submitted && (
+          <button onClick={onAdd} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
+            <Plus size={15} /> Добавить заказ
+          </button>
+        )}
+      </div>
+
+      {collapsed.length > 0 && (
+        <div>
+          <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-1">Что уйдёт в ОТЛ · {collapsed.length} заказ(ов)</h2>
+          <p className="text-xs text-stone-400 mb-3">
+            Заказы одного магазина в одной группе объединены: номер — первого заказа, вес и объём — суммы, паллеты считаются по суммам.
+          </p>
+          <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+                  <th className="text-left font-semibold px-4 py-3">Магазин</th>
+                  <th className="text-left font-semibold px-4 py-3">Группа</th>
+                  <th className="text-left font-semibold px-4 py-3">Заказ №</th>
+                  <th className="text-left font-semibold px-4 py-3">Объединено</th>
+                  <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
+                  <th className="text-right font-semibold px-4 py-3">Объём, м³</th>
+                  <th className="text-right font-semibold px-4 py-3">Паллеты</th>
+                </tr>
+              </thead>
+              <tbody>
+                {collapsed.map((g) => (
+                  <tr key={g.key} className="border-t border-stone-100">
+                    <td className="px-4 py-2 text-stone-700">{g.store || <span className="text-rose-600">— не выбран —</span>}</td>
+                    <td className="px-4 py-2 text-stone-600">{g.category || <span className="text-rose-600">—</span>}</td>
+                    <td className="px-4 py-2 font-mono">{g.order}</td>
+                    <td className="px-4 py-2 text-xs text-stone-500">{g.count > 1 ? `${g.count} заказа: ${g.orders.join(", ")}` : "—"}</td>
+                    <td className="px-4 py-2 text-right font-mono text-stone-600">{g.weight}</td>
+                    <td className="px-4 py-2 text-right font-mono text-stone-600">{g.volume}</td>
+                    <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{g.pallets}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-stone-200 bg-stone-50">
+                  <td colSpan={4} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(totalWeight * 100) / 100}</td>
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(collapsed.reduce((s, g) => s + g.volume, 0) * 100) / 100}</td>
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{totalPallets}</td>
