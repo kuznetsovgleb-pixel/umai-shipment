@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { STORES } from "../data/reference";
+import { STORES_NO_KARAKOL as STORES } from "../data/reference";
 
 // ---------------------------------------------------------------------------
 // Холод Юг: даты отгрузки, загрузка заказов Жашылчи из файла 1С,
@@ -75,10 +75,14 @@ export const collapseYugRows = (rows) => {
     if (!order) return;
     const weight = parseFloat(r.weight) || 0;
     const volume = parseFloat(r.volume) || 0;
-    const storeKey = (r.store || "").trim().toLowerCase();
+    const category = r.category || "";
+    const storeName = (r.store || "").trim().toLowerCase();
+    // заказы одного магазина объединяются; если у строк есть товарная группа
+    // (Транзит Юг) — только в пределах одной группы
+    const storeKey = storeName ? `${storeName}|${category}` : "";
     let g = storeKey ? byStore.get(storeKey) : null;
     if (!g) {
-      g = { key: r.id, store: r.store || "", order, orders: [], count: 0, weight: 0, volume: 0, firstId: r.id };
+      g = { key: r.id, store: r.store || "", category, order, orders: [], count: 0, weight: 0, volume: 0, firstId: r.id };
       groups.push(g);
       if (storeKey) byStore.set(storeKey, g);
     }
