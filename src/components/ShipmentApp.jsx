@@ -2,14 +2,20 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import {
   Plus, Trash2, Send, Download, Truck, CheckCircle2, Circle, AlertTriangle,
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
+  Snowflake, Upload, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
   emptyKarakolDay, subscribeToKarakolDay, saveKarakolRows, setKarakolSubmitted,
+  emptyHolodYugDay, subscribeToHolodYugDay, saveHolodYugRows, setHolodYugSubmitted, makeEmptyYugRow,
 } from "../lib/dayStore";
-import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers } from "../lib/exportExcel";
+import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook } from "../lib/exportExcel";
+import {
+  YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort,
+  collapseYugRows, parseYugFile,
+} from "../lib/yug";
 
 const ACCENT = {
   emerald: { text: "text-emerald-700", bg: "bg-emerald-600", dot: "bg-emerald-500" },
@@ -112,7 +118,7 @@ const findDuplicateStores = (rows) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "karakol", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "karakol", "holod_yug", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -221,6 +227,71 @@ const consolidateRows = (warehouses, dayData) => {
     });
   });
   return rows;
+};
+
+// ---------------------------------------------------------------------------
+// Холод Юг: вспомогательные функции
+// ---------------------------------------------------------------------------
+
+const YUG_SAG_WH = WAREHOUSES.find((w) => w.id === "sagadalieva_zamorozka");
+const YUG_STATUS_WHS = [
+  { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose" },
+  { id: "zhashylcha", name: YUG_ZH_NAME, accent: "cyan" },
+];
+
+const yugHasData = (r) => Boolean(String(r.order || "").trim() || r.store || r.weight || r.volume);
+const yugIssues = (r) => {
+  const hasData = yugHasData(r);
+  if (!hasData) return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, incomplete: false };
+  const missingOrder = !String(r.order || "").trim();
+  const missingStore = !r.store;
+  const missingQty = !(parseFloat(r.weight) > 0) && !(parseFloat(r.volume) > 0);
+  return { hasData: true, missingOrder, missingStore, missingQty, incomplete: missingOrder || missingStore || missingQty };
+};
+
+// повторная загрузка файла: заказы с тем же номером обновляются, новые добавляются,
+// остальные строки не трогаем
+const mergeYugLines = (rows, lines) => {
+  const next = rows.filter(yugHasData).map((r) => ({ ...r }));
+  const byOrder = new Map();
+  next.forEach((r, i) => {
+    const k = String(r.order || "").trim().toLowerCase();
+    if (k) byOrder.set(k, i);
+  });
+  let added = 0, updated = 0;
+  lines.forEach((l) => {
+    const k = l.order.trim().toLowerCase();
+    const patch = { rawStore: l.rawName, weight: String(l.weight), volume: String(l.volume) };
+    if (byOrder.has(k)) {
+      const i = byOrder.get(k);
+      next[i] = { ...next[i], ...patch, store: l.store || next[i].store };
+      updated += 1;
+    } else {
+      byOrder.set(k, next.length);
+      next.push({ ...makeEmptyYugRow(), order: l.order, store: l.store, ...patch });
+      added += 1;
+    }
+  });
+  return { rows: next.length ? next : [makeEmptyYugRow()], added, updated };
+};
+
+// плоский список для ОТЛ и выгрузки: Садыгалиева (заморозка) + Жашылча (схлопнутая по магазинам)
+const buildYugConsolidated = (yDay) => {
+  const list = consolidateRows([YUG_SAG_WH], yDay);
+  if (yDay.submitted_zhashylcha) {
+    collapseYugRows(yDay.rows_zhashylcha || []).forEach((g) => {
+      list.push({
+        id: g.key, whId: "zhashylcha", warehouse: YUG_ZH_NAME, shipPoint: YUG_ZH_SHIP_POINT, accent: "cyan",
+        order: g.order, store: g.store || "—",
+        pallets: g.pallets, rolls: null, euro: null, american: null, boxes: null,
+        weight: Math.round(g.weight * 100) / 100,
+        total: g.pallets,
+        unloadSec: PALLET_UNLOAD_SEC,
+        group: YUG_ZH_GROUP,
+      });
+    });
+  }
+  return list;
 };
 
 // ---------------------------------------------------------------------------
@@ -374,6 +445,7 @@ function StoreSelect({ value, onChange, disabled, hasError }) {
     </div>
   );
 }
+
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
   const [day, setDay] = useState(emptyDay());
@@ -385,6 +457,11 @@ export default function ShipmentApp() {
   const [kDay, setKDay] = useState(emptyKarakolDay());
   const [kLoading, setKLoading] = useState(true);
   const [karakolSub, setKarakolSub] = useState("prigorodnoe");
+  // Холод Юг: свой календарь (только пн, ср, сб) и своя коллекция
+  const [yDate, setYDate] = useState(() => nextShipDate(todayISO()));
+  const [yDay, setYDay] = useState(emptyHolodYugDay());
+  const [yLoading, setYLoading] = useState(true);
+  const [yugSub, setYugSub] = useState("sagadalieva_zamorozka");
 
   // лёгкая отдельная подписка только на статус Жашылчи (для строки статусов
   // на вкладке «Для ОТЛ») — сами заказы сюда не подтягиваются, контур отдельный
@@ -411,6 +488,21 @@ export default function ShipmentApp() {
     );
     return unsub;
   }, [date]);
+
+  // Холод Юг: подписка на выбранную дату отгрузки (нужна и своей вкладке,
+  // и строке статусов на вкладке «Для ОТЛ»)
+  useEffect(() => {
+    setYLoading(true);
+    const unsub = subscribeToHolodYugDay(
+      yDate,
+      (data) => {
+        setYDay(data);
+        setYLoading(false);
+      },
+      () => setYLoading(false)
+    );
+    return unsub;
+  }, [yDate]);
 
   // подписка в реальном времени — если склад или ОТЛ поменяли что-то,
   // все остальные видят это без перезагрузки
@@ -526,6 +618,106 @@ export default function ShipmentApp() {
   };
   const unlockKarakol = (whId) => setKarakolSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
+  // ---- Холод Юг ----
+  const changeYugDate = (iso) => {
+    if (!iso) return;
+    const snapped = nextShipDate(iso);
+    if (snapped !== iso) showToast(`Отгрузка бывает только по пн, ср и сб — выбрана ближайшая: ${fmtDateRu(snapped)}`);
+    setYDate(snapped);
+  };
+
+  const patchYugRows = useCallback(
+    (key, updater) => {
+      setYDay((current) => {
+        const nextRows = updater(current[`rows_${key}`] || []);
+        const next = { ...current, [`rows_${key}`]: nextRows };
+        const tkey = `y_rows_${key}`;
+        if (saveTimers.current[tkey]) clearTimeout(saveTimers.current[tkey]);
+        saveTimers.current[tkey] = setTimeout(() => {
+          saveHolodYugRows(yDate, key, nextRows).catch(() => showToast("Не удалось сохранить — проверьте связь"));
+        }, 500);
+        return next;
+      });
+    },
+    [yDate]
+  );
+
+  // Садыгалиева (заморозка) в Холод Юг — та же форма, что и на основной вкладке
+  const updateYugSag = (rowId, field, value) =>
+    patchYugRows("sagadalieva_zamorozka", (rows) => rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)));
+  const addYugSag = () => patchYugRows("sagadalieva_zamorozka", (rows) => [...rows, makeEmptyRow()]);
+  const removeYugSag = (rowId) =>
+    patchYugRows("sagadalieva_zamorozka", (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
+  const submitYugSag = async () => {
+    const err = submitCheck(YUG_SAG_WH, yDay.rows_sagadalieva_zamorozka || [], yugSagDuplicates);
+    if (err) return showToast(err);
+    try {
+      await setHolodYugSubmitted(yDate, "sagadalieva_zamorozka", true);
+      showToast("Холод Юг · Садыгалиева (заморозка): данные отправлены в транспортный отдел");
+    } catch {
+      showToast("Не удалось отправить — проверьте связь и попробуйте снова");
+    }
+  };
+  const unlockYugSag = () => setHolodYugSubmitted(yDate, "sagadalieva_zamorozka", false).catch(() => showToast("Не удалось изменить статус"));
+
+  // Жашылча (Холод Юг): строки из файла 1С + ручные правки
+  const updateYugZh = (rowId, field, value) =>
+    patchYugRows("zhashylcha", (rows) =>
+      rows.map((r) => {
+        if (r.id !== rowId) return r;
+        const v = field === "weight" || field === "volume" ? sanitizeWeight(value) : value;
+        return { ...r, [field]: v };
+      })
+    );
+  const addYugZh = () => patchYugRows("zhashylcha", (rows) => [...rows, makeEmptyYugRow()]);
+  const removeYugZh = (rowId) =>
+    patchYugRows("zhashylcha", (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
+
+  const loadYugFile = async (file) => {
+    if (!file) return;
+    let buf;
+    try {
+      buf = await file.arrayBuffer();
+    } catch {
+      return showToast("Не удалось прочитать файл");
+    }
+    const res = parseYugFile(buf);
+    if (res.error) return showToast(res.error);
+    if (res.dates.length > 0 && (res.dates.length > 1 || res.dates[0] !== yDate)) {
+      const list = res.dates.map(fmtDateRu).join(", ");
+      const ok = window.confirm(
+        `В файле дата отгрузки: ${list}, а выбрана ${fmtDateRu(yDate)}.\n\nВсё равно загрузить заказы в список на ${fmtDateRu(yDate)}?`
+      );
+      if (!ok) return;
+    }
+    const merged = mergeYugLines(yDay.rows_zhashylcha || [], res.lines);
+    patchYugRows("zhashylcha", () => merged.rows);
+    const noStore = res.lines.filter((l) => !l.store).length;
+    showToast(
+      `Загружено: новых ${merged.added}, обновлено ${merged.updated}` + (noStore ? `, магазин не найден: ${noStore} — выберите вручную` : "")
+    );
+  };
+
+  const submitYugZh = async () => {
+    const rows = (yDay.rows_zhashylcha || []).filter(yugHasData);
+    if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
+    const bad = rows.filter((r) => yugIssues(r).incomplete).length;
+    if (bad > 0) return showToast(bad === 1 ? "Одна строка заполнена не полностью — проверьте подсвеченные поля" : `${bad} строк заполнены не полностью — проверьте подсвеченные поля`);
+    const seen = new Set();
+    for (const r of rows) {
+      const k = r.order.trim().toLowerCase();
+      if (seen.has(k)) return showToast("Есть повторяющиеся номера заказов — исправьте перед отправкой");
+      seen.add(k);
+    }
+    try {
+      await setHolodYugSubmitted(yDate, "zhashylcha", true);
+      showToast("Холод Юг · Жашылча: данные отправлены в транспортный отдел");
+    } catch {
+      showToast("Не удалось отправить — проверьте связь и попробуйте снова");
+    }
+  };
+  const unlockYugZh = () => setHolodYugSubmitted(yDate, "zhashylcha", false).catch(() => showToast("Не удалось изменить статус"));
+
   // ---- ОТЛ: транспорт ----
   const patchVehicles = useCallback(
     (updater) => {
@@ -552,6 +744,8 @@ export default function ShipmentApp() {
   const consolidated = useMemo(() => consolidateRows(WAREHOUSES, day), [day]);
   const karakolConsolidated = useMemo(() => consolidateRows(KARAKOL_WAREHOUSES, kDay), [kDay]);
   const karakolTransfers = useMemo(() => buildKarakolTransfers(date, karakolConsolidated), [date, karakolConsolidated]);
+  const yugSagDuplicates = useMemo(() => findDuplicateOrders([YUG_SAG_WH], yDay), [yDay]);
+  const yugConsolidated = useMemo(() => buildYugConsolidated(yDay), [yDay]);
 
   const exportExcel = () => {
     if (consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
@@ -565,6 +759,12 @@ export default function ShipmentApp() {
     if (karakolConsolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов Каракола");
     downloadKarakolWorkbook(date, karakolConsolidated);
     showToast("Файл Каракола сформирован и скачан");
+  };
+
+  const exportYug = () => {
+    if (yugConsolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов Холод Юг");
+    downloadHolodYugWorkbook(yDate, yugConsolidated);
+    showToast("Файл Холод Юг сформирован и скачан");
   };
 
   const tabLabel = (id) => (id === "otl" ? "Для ОТЛ" : WAREHOUSES.find((w) => w.id === id)?.name);
@@ -581,10 +781,12 @@ export default function ShipmentApp() {
             <div className="flex items-center gap-1.5 text-xs font-medium text-stone-400">
               <Wifi size={13} className="text-emerald-500" /> Синхронизировано
             </div>
-            <label className="flex items-center gap-2 bg-stone-50 border border-stone-300 rounded-lg px-3 py-2">
-              <span className="text-xs font-medium text-stone-500 uppercase tracking-wide">Дата</span>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent text-sm font-mono font-semibold text-stone-900 outline-none" />
-            </label>
+            {activeTab !== "holod_yug" && (
+              <label className="flex items-center gap-2 bg-stone-50 border border-stone-300 rounded-lg px-3 py-2">
+                <span className="text-xs font-medium text-stone-500 uppercase tracking-wide">Дата</span>
+                <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent text-sm font-mono font-semibold text-stone-900 outline-none" />
+              </label>
+            )}
           </div>
         </div>
       </div>
@@ -601,10 +803,11 @@ export default function ShipmentApp() {
             const isOtl = id === "otl";
             const isZh = id === "zhashylcha";
             const isK = id === "karakol";
-            const w = !isOtl && !isZh && !isK ? WAREHOUSES.find((x) => x.id === id) : null;
-            const a = w ? ACCENT[w.accent] : isZh ? ACCENT.cyan : isK ? ACCENT.fuchsia : null;
+            const isY = id === "holod_yug";
+            const w = !isOtl && !isZh && !isK && !isY ? WAREHOUSES.find((x) => x.id === id) : null;
+            const a = w ? ACCENT[w.accent] : isZh ? ACCENT.cyan : isK ? ACCENT.fuchsia : isY ? ACCENT.sky : null;
             const active = activeTab === id;
-            const sub = !isOtl && !isZh && !isK && day[`submitted_${id}`];
+            const sub = !isOtl && !isZh && !isK && !isY && day[`submitted_${id}`];
             return (
               <button
                 key={id}
@@ -613,8 +816,8 @@ export default function ShipmentApp() {
                   active ? "bg-stone-50 text-stone-900" : "text-stone-500 hover:text-stone-700"
                 }`}
               >
-                {isOtl ? <Truck size={14} /> : isZh ? <Moon size={14} /> : isK ? <Mountain size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
-                {isZh ? ZH_DISPLAY_NAME : isK ? "Каракол" : tabLabel(id)}
+                {isOtl ? <Truck size={14} /> : isZh ? <Moon size={14} /> : isK ? <Mountain size={14} /> : isY ? <Snowflake size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
+                {isZh ? ZH_DISPLAY_NAME : isK ? "Каракол" : isY ? "Холод Юг" : tabLabel(id)}
                 {sub && <Lock size={12} className="text-stone-400" />}
                 {active && <span className={`absolute left-0 right-0 -bottom-px h-0.5 ${isOtl ? "bg-stone-800" : a.bg}`} />}
               </button>
@@ -626,6 +829,26 @@ export default function ShipmentApp() {
       <div className="max-w-6xl mx-auto px-6 py-6">
         {activeTab === "zhashylcha" ? (
           <ZhashylchaPanel date={date} />
+        ) : activeTab === "holod_yug" ? (
+          <HolodYugPanel
+            date={yDate}
+            onDateChange={changeYugDate}
+            yDay={yDay}
+            loading={yLoading}
+            sub={yugSub}
+            onSubChange={setYugSub}
+            sag={{
+              duplicateOrders: yugSagDuplicates,
+              onUpdate: updateYugSag, onAdd: addYugSag, onRemove: removeYugSag,
+              onSubmit: submitYugSag, onUnlock: unlockYugSag,
+            }}
+            zh={{
+              onUpdate: updateYugZh, onAdd: addYugZh, onRemove: removeYugZh,
+              onSubmit: submitYugZh, onUnlock: unlockYugZh, onFile: loadYugFile,
+            }}
+            consolidated={yugConsolidated}
+            onExport={exportYug}
+          />
         ) : activeTab === "karakol" ? (
           <KarakolPanel
             kDay={kDay}
@@ -672,6 +895,8 @@ export default function ShipmentApp() {
             dateLabel={fmtDateRu(date)}
             zhSubmitted={zhSubmitted}
             karakolDay={kDay}
+            yugDay={yDay}
+            yugDateLabel={fmtDateRu(yDate)}
           />
         )}
       </div>
@@ -684,6 +909,7 @@ export default function ShipmentApp() {
     </div>
   );
 }
+
 // ---------------------------------------------------------------------------
 // Вкладка склада
 // ---------------------------------------------------------------------------
@@ -948,6 +1174,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
     </div>
   );
 }
+
 // ---------------------------------------------------------------------------
 // Вкладка ОТЛ
 // ---------------------------------------------------------------------------
@@ -956,7 +1183,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
 // (раздела «Транспорт» там нет), transfers — предпросмотр перемещений РЦ → РЦ Каракол.
 function OtlPanel({
   day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhSubmitted,
-  karakolDay = null, warehouses = WAREHOUSES, showTransport = true, transfers = null, titlePrefix = "",
+  karakolDay = null, yugDay = null, yugDateLabel = "", warehouses = WAREHOUSES, showTransport = true, transfers = null, titlePrefix = "",
 }) {
   const totalPallets = consolidated.reduce((s, r) => s + r.total, 0);
   const totalWeight = consolidated.reduce((s, r) => s + r.weight, 0);
@@ -997,6 +1224,23 @@ function OtlPanel({
                   {sub ? <CheckCircle2 size={15} className="text-fuchsia-700" /> : <Circle size={15} className="text-stone-300" />}
                   <span className={sub ? "text-stone-900" : "text-stone-400"}>{w.name}</span>
                   <span className={`text-xs ${sub ? "text-fuchsia-700" : "text-stone-400"}`}>{sub ? "отправлено" : "ожидание"}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {yugDay && (
+          <div className="w-full flex items-center gap-6 flex-wrap border-t border-stone-100 pt-3">
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-700">
+              <Snowflake size={13} /> Холод Юг · отгрузка {yugDateLabel}
+            </span>
+            {YUG_STATUS_WHS.map((w) => {
+              const sub = yugDay[`submitted_${w.id}`];
+              return (
+                <div key={w.id} className="flex items-center gap-1.5 text-sm font-medium">
+                  {sub ? <CheckCircle2 size={15} className="text-sky-700" /> : <Circle size={15} className="text-stone-300" />}
+                  <span className={sub ? "text-stone-900" : "text-stone-400"}>{w.name}</span>
+                  <span className={`text-xs ${sub ? "text-sky-700" : "text-stone-400"}`}>{sub ? "отправлено" : "ожидание"}</span>
                 </div>
               );
             })}
@@ -1339,6 +1583,7 @@ function KarakolPanel({
     </div>
   );
 }
+
 // ---------------------------------------------------------------------------
 // Жашылча (ночь) — полностью отдельный контур: свой склад, свой список ТС,
 // своя выгрузка, всегда на сегодняшнюю дату (заказы подаются день в день)
@@ -1844,6 +2089,316 @@ function ZhashylchaPanel({ date }) {
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-stone-900 text-white text-sm font-medium px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
           <AlertTriangle size={14} className="text-amber-400" /> {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Холод Юг: своя дата отгрузки (пн, ср, сб) и 3 подвкладки —
+// Садыгалиева (заморозка), Жашылча (загрузка из файла 1С), Для ОТЛ
+// ---------------------------------------------------------------------------
+
+function YugDateBar({ date, onChange }) {
+  return (
+    <div className="bg-white border border-sky-200 rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap">
+      <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-700">
+        <Snowflake size={13} /> Дата отгрузки
+      </span>
+      <button onClick={() => onChange(stepShipDate(date, -1))} className="p-1.5 rounded-md border border-stone-300 text-stone-600 hover:border-stone-500" title="Предыдущая отгрузка">
+        <ChevronLeft size={15} />
+      </button>
+      <label className="flex items-center gap-2 bg-stone-50 border border-stone-300 rounded-lg px-3 py-1.5">
+        <input type="date" value={date} onChange={(e) => onChange(e.target.value)} className="bg-transparent text-sm font-mono font-semibold text-stone-900 outline-none" />
+        <span className="text-xs font-bold text-sky-700">{weekdayShort(date)}</span>
+      </label>
+      <button onClick={() => onChange(stepShipDate(date, 1))} className="p-1.5 rounded-md border border-stone-300 text-stone-600 hover:border-stone-500" title="Следующая отгрузка">
+        <ChevronRight size={15} />
+      </button>
+      <button onClick={() => onChange(nextShipDate(todayISO()))} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900">
+        Ближайшая
+      </button>
+      <span className="text-xs text-stone-400">
+        Отгрузка по пн, ср и сб. Заявки вводят накануне и копят до дня отгрузки; новый пустой список открывается со следующей датой отгрузки.
+      </span>
+    </div>
+  );
+}
+
+function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sag, zh, consolidated, onExport }) {
+  const dateLabel = fmtDateRu(date);
+  const pill = (active) =>
+    `flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
+      active ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
+    }`;
+  const subs = [
+    { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose" },
+    { id: "zhashylcha", name: YUG_ZH_NAME, accent: "cyan" },
+  ];
+
+  return (
+    <div className="space-y-5">
+      <YugDateBar date={date} onChange={onDateChange} />
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {subs.map((w) => {
+          const submitted = yDay[`submitted_${w.id}`];
+          const active = sub === w.id;
+          return (
+            <button key={w.id} onClick={() => onSubChange(w.id)} className={pill(active)}>
+              <span className={`h-1.5 w-1.5 rounded-full ${submitted ? ACCENT[w.accent].dot : "bg-stone-300"}`} />
+              {w.name}
+              {submitted && <Lock size={12} className={active ? "text-stone-300" : "text-stone-400"} />}
+            </button>
+          );
+        })}
+        <button onClick={() => onSubChange("otl")} className={pill(sub === "otl")}>
+          <Truck size={14} /> Для ОТЛ (Холод Юг)
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
+          <Loader2 size={16} className="animate-spin" /> Загрузка данных Холод Юг за {dateLabel}…
+        </div>
+      ) : sub === "otl" ? (
+        <OtlPanel
+          day={yDay}
+          consolidated={consolidated}
+          onExport={onExport}
+          dateLabel={dateLabel}
+          warehouses={YUG_STATUS_WHS}
+          showTransport={false}
+          titlePrefix="Холод Юг"
+        />
+      ) : sub === "zhashylcha" ? (
+        <YugZhashylchaPanel
+          rows={yDay.rows_zhashylcha || []}
+          submitted={yDay.submitted_zhashylcha}
+          dateLabel={dateLabel}
+          {...zh}
+        />
+      ) : (
+        <WarehousePanel
+          key="yug_sag"
+          wh={YUG_SAG_WH}
+          prefix="Холод Юг"
+          rows={yDay.rows_sagadalieva_zamorozka || []}
+          submitted={yDay.submitted_sagadalieva_zamorozka}
+          duplicateOrders={sag.duplicateOrders}
+          onUpdate={sag.onUpdate}
+          onPasteQty={(rowId, field, raw) => sag.onUpdate(rowId, field, sanitizeQty(raw))}
+          onAdd={sag.onAdd}
+          onRemove={sag.onRemove}
+          onSubmit={sag.onSubmit}
+          onUnlock={sag.onUnlock}
+          dateLabel={dateLabel}
+        />
+      )}
+    </div>
+  );
+}
+
+function YugZhashylchaPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove, onSubmit, onUnlock, onFile }) {
+  const fileRef = useRef(null);
+  const a = ACCENT.cyan;
+
+  const dupOrders = useMemo(() => {
+    const counts = {};
+    rows.forEach((r) => {
+      const k = String(r.order || "").trim().toLowerCase();
+      if (k) counts[k] = (counts[k] || 0) + 1;
+    });
+    return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
+  }, [rows]);
+
+  const collapsed = useMemo(() => collapseYugRows(rows), [rows]);
+  const totalPallets = collapsed.reduce((s, g) => s + g.pallets, 0);
+  const totalWeight = collapsed.reduce((s, g) => s + g.weight, 0);
+  const noStoreCount = rows.filter((r) => yugHasData(r) && !r.store).length;
+  const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
+  const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <div className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${a.text} mb-1`}>
+          <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Холод Юг · {YUG_ZH_NAME}
+        </div>
+        <p className="text-sm text-stone-500">
+          Заказы на отгрузку {dateLabel}: загрузите файл из 1С или добавьте строки вручную. Магазин подбирается по названию,
+          а если не нашёлся — выберите из списка. Заказы одного магазина объединяются в один (вес и объём суммируются).
+          Паллеты: до {500} кг и до {1} м³ — одна паллета, больше по весу или объёму — несколько. Точка отгрузки — {YUG_ZH_SHIP_POINT}, группа — {YUG_ZH_GROUP}.
+        </p>
+      </div>
+
+      {submitted && (
+        <div className="flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-stone-700">
+            <Lock size={15} className="text-stone-500" /> Данные на {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
+          </div>
+          <button onClick={onUnlock} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900 whitespace-nowrap">
+            Вернуть на редактирование
+          </button>
+        </div>
+      )}
+
+      {!submitted && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <input
+            ref={fileRef} type="file" accept=".xlsx,.xls" className="hidden"
+            onChange={(e) => {
+              const f = e.target.files && e.target.files[0];
+              e.target.value = "";
+              onFile(f);
+            }}
+          />
+          <button onClick={() => fileRef.current && fileRef.current.click()} className="flex items-center gap-2 bg-cyan-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:opacity-90">
+            <Upload size={15} /> Загрузить файл из 1С
+          </button>
+          <span className="text-xs text-stone-400">
+            Повторная загрузка: заказы с тем же номером обновляются, новые добавляются, остальные строки не меняются.
+          </span>
+        </div>
+      )}
+
+      <div className="flex items-center gap-6 flex-wrap text-sm">
+        <span className="text-stone-500">Строк в файле/списке: <b className="font-mono text-stone-900">{rows.filter(yugHasData).length}</b></span>
+        <span className="text-stone-500">Магазинов: <b className="font-mono text-stone-900">{collapsed.length}</b></span>
+        <span className="text-stone-500">Паллет: <b className="font-mono text-stone-900">{totalPallets}</b></span>
+        <span className="text-stone-500">Вес: <b className="font-mono text-stone-900">{Math.round(totalWeight * 100) / 100} кг</b></span>
+        {noStoreCount > 0 && (
+          <span className="inline-flex items-center gap-1.5 text-rose-600 font-semibold">
+            <AlertTriangle size={14} /> Без магазина: {noStoreCount}
+          </span>
+        )}
+      </div>
+
+      <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+              <th className="text-left font-semibold px-4 py-3 w-10">#</th>
+              <th className="text-left font-semibold px-4 py-3 w-44">Заказ №</th>
+              <th className="text-left font-semibold px-4 py-3">Магазин</th>
+              <th className="text-left font-semibold px-4 py-3 w-32">Вес, кг</th>
+              <th className="text-left font-semibold px-4 py-3 w-32">Объём, м³</th>
+              <th className="px-4 py-3 w-10" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const issues = yugIssues(r);
+              const isDupe = String(r.order || "").trim() && dupOrders.has(r.order.trim().toLowerCase());
+              return (
+                <tr key={r.id} className="border-t border-stone-100 align-top">
+                  <td className="px-4 py-2 text-stone-400 font-mono text-xs pt-2.5">{i + 1}</td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" disabled={submitted} value={r.order}
+                      onChange={(e) => onUpdate(r.id, "order", e.target.value)}
+                      placeholder="Номер ERP"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${isDupe || issues.missingOrder ? errBorder : okBorder}`}
+                    />
+                    {isDupe && <div className="text-xs text-rose-600 mt-1">Номер дублируется</div>}
+                    {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <StoreSelect disabled={submitted} value={r.store} onChange={(v) => onUpdate(r.id, "store", v)} hasError={Boolean(issues.missingStore)} />
+                    {issues.missingStore && (
+                      <div className="text-xs text-rose-600 mt-1">
+                        {r.rawStore ? `Магазин не найден по названию «${r.rawStore}» — выберите вручную` : "Выберите магазин"}
+                      </div>
+                    )}
+                    {!issues.missingStore && r.rawStore && r.rawStore !== r.store && (
+                      <div className="text-xs text-stone-400 mt-1">В файле: {r.rawStore}</div>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="decimal" disabled={submitted} value={r.weight}
+                      onChange={(e) => onUpdate(r.id, "weight", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="decimal" disabled={submitted} value={r.volume}
+                      onChange={(e) => onUpdate(r.id, "volume", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                    />
+                    {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите вес или объём</div>}
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    {!submitted && (
+                      <button onClick={() => onRemove(r.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!submitted && (
+          <button onClick={onAdd} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
+            <Plus size={15} /> Добавить заказ
+          </button>
+        )}
+      </div>
+
+      {collapsed.length > 0 && (
+        <div>
+          <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-1">Что уйдёт в ОТЛ · {collapsed.length} заказ(ов)</h2>
+          <p className="text-xs text-stone-400 mb-3">
+            Заказы одного магазина объединены: номер — первого заказа, вес и объём — суммы, паллеты считаются по суммам.
+          </p>
+          <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+                  <th className="text-left font-semibold px-4 py-3">Магазин</th>
+                  <th className="text-left font-semibold px-4 py-3">Заказ №</th>
+                  <th className="text-left font-semibold px-4 py-3">Объединено</th>
+                  <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
+                  <th className="text-right font-semibold px-4 py-3">Объём, м³</th>
+                  <th className="text-right font-semibold px-4 py-3">Паллеты</th>
+                </tr>
+              </thead>
+              <tbody>
+                {collapsed.map((g) => (
+                  <tr key={g.key} className="border-t border-stone-100">
+                    <td className="px-4 py-2 text-stone-700">{g.store || <span className="text-rose-600">— не выбран —</span>}</td>
+                    <td className="px-4 py-2 font-mono">{g.order}</td>
+                    <td className="px-4 py-2 text-xs text-stone-500">{g.count > 1 ? `${g.count} заказа: ${g.orders.join(", ")}` : "—"}</td>
+                    <td className="px-4 py-2 text-right font-mono text-stone-600">{g.weight}</td>
+                    <td className="px-4 py-2 text-right font-mono text-stone-600">{g.volume}</td>
+                    <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{g.pallets}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-stone-200 bg-stone-50">
+                  <td colSpan={3} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(totalWeight * 100) / 100}</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(collapsed.reduce((s, g) => s + g.volume, 0) * 100) / 100}</td>
+                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{totalPallets}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!submitted && (
+        <div className="flex justify-end">
+          <button onClick={onSubmit} className={`flex items-center gap-2 ${a.bg} text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:opacity-90 transition-opacity shadow-sm`}>
+            <Send size={15} /> Отправить в транспортный отдел
+          </button>
         </div>
       )}
     </div>
