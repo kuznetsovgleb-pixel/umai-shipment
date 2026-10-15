@@ -271,3 +271,80 @@ export async function setKarakolSubmitted(date, whId, value) {
     throw err;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Холод Юг — коллекция shipments_holod_yug/{YYYY-MM-DD}, где дата — ДАТА ОТГРУЗКИ
+// (понедельник, среда или суббота). Внутри два склада:
+//   sagadalieva_zamorozka — строки как у обычных складов (makeEmptyRow),
+//   zhashylcha            — строки из файла 1С: номер, магазин, вес, объём.
+// Данные копятся до дня отгрузки: на каждую дату отгрузки — свой документ.
+// ---------------------------------------------------------------------------
+
+export const HOLOD_YUG_KEYS = ["sagadalieva_zamorozka", "zhashylcha"];
+
+export const makeEmptyYugRow = () => ({
+  id: uid(), order: "", store: "", rawStore: "", weight: "", volume: "",
+});
+
+const emptyYugRowsFor = (key) => [key === "zhashylcha" ? makeEmptyYugRow() : makeEmptyRow()];
+
+export const emptyHolodYugDay = () => {
+  const day = {};
+  HOLOD_YUG_KEYS.forEach((key) => {
+    day[`rows_${key}`] = emptyYugRowsFor(key);
+    day[`submitted_${key}`] = false;
+  });
+  return day;
+};
+
+const holodYugRef = (date) => doc(db, "shipments_holod_yug", date);
+
+export function subscribeToHolodYugDay(date, onChange, onError) {
+  return onSnapshot(
+    holodYugRef(date),
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        // досоздаём только недостающие поля, существующие данные не трогаем
+        const patch = {};
+        HOLOD_YUG_KEYS.forEach((key) => {
+          if (!Array.isArray(data[`rows_${key}`])) patch[`rows_${key}`] = emptyYugRowsFor(key);
+          if (typeof data[`submitted_${key}`] !== "boolean") patch[`submitted_${key}`] = false;
+        });
+        if (Object.keys(patch).length > 0) {
+          setDoc(holodYugRef(date), patch, { merge: true }).catch((err) =>
+            console.error("[dayStore] holod_yug backfill failed for", date, err)
+          );
+          onChange({ ...data, ...patch });
+        } else {
+          onChange(data);
+        }
+      } else {
+        const seed = emptyHolodYugDay();
+        setDoc(holodYugRef(date), seed, { merge: true }).catch((err) =>
+          console.error("[dayStore] holod_yug seed creation failed for", date, err)
+        );
+        onChange(seed);
+      }
+    },
+    (err) => onError && onError(err)
+  );
+}
+
+export async function saveHolodYugRows(date, key, rows) {
+  try {
+    await setDoc(holodYugRef(date), { [`rows_${key}`]: rows }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] saveHolodYugRows failed", { date, key }, err);
+    throw err;
+  }
+}
+
+export async function setHolodYugSubmitted(date, key, value) {
+  try {
+    await setDoc(holodYugRef(date), { [`submitted_${key}`]: value }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] setHolodYugSubmitted failed", { date, key, value }, err);
+    throw err;
+  }
+}
