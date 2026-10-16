@@ -4,7 +4,7 @@ import {
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
   Snowflake, Upload, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
@@ -464,7 +464,7 @@ function StoreSelect({ value, onChange, disabled, hasError, stores = STORES_NO_K
       )}
     </div>
   );
-} 
+}
 
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
@@ -693,7 +693,7 @@ export default function ShipmentApp() {
   const removeYugZh = (rowId) =>
     patchYugRows("zhashylcha", (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
 
-  // Транзит Юг (Холод Юг): вручную — номер, магазин, вес, объём, товарная группа
+  // Транзит Юг (Холод Юг): вручную — номер, магазин, вес, товарная группа
   const updateYugTr = (rowId, field, value) =>
     patchYugRows("transit_yug", (rows) =>
       rows.map((r) => {
@@ -939,6 +939,7 @@ export default function ShipmentApp() {
             onSubmit={() => submitWarehouse(activeTab)}
             onUnlock={() => unlockWarehouse(activeTab)}
             dateLabel={fmtDateRu(date)}
+            stores={YUG_WAREHOUSE_IDS.includes(activeTab) ? STORES_NO_YUG : STORES_NO_KARAKOL}
           />
         ) : (
           <OtlPanel
@@ -1237,6 +1238,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
 
 // Переиспользуется и для Каракола: warehouses = склады Каракола, showTransport = false
 // (раздела «Транспорт» там нет), transfers — предпросмотр перемещений РЦ → РЦ Каракол.
+
 function OtlPanel({
   day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhSubmitted,
   karakolDay = null, yugDay = null, yugDateLabel = "", warehouses = WAREHOUSES, showTransport = true, transfers = null, titlePrefix = "",
@@ -1915,7 +1917,7 @@ function ZhashylchaPanel({ date }) {
                     </td>
                     <td className="px-4 py-2">
                       <StoreSelect
-                        disabled={!isToday || zhDay.submitted} value={r.store}
+                        disabled={!isToday || zhDay.submitted} value={r.store} stores={STORES_NO_YUG}
                         onChange={(v) => updateRow(r.id, "store", v)}
                         hasError={Boolean(issues.missingStore || isDupeStore)}
                       />
@@ -2153,8 +2155,8 @@ function ZhashylchaPanel({ date }) {
 }
 
 // ---------------------------------------------------------------------------
-// Холод Юг: своя дата отгрузки (пн, ср, сб) и подвкладки —
-// Садыгалиева (заморозка), Жашылча (загрузка из файла 1С), Транзит Юг, Для ОТЛ
+// Холод Юг: своя дата отгрузки (пн, ср, сб) и 3 подвкладки —
+// Садыгалиева (заморозка), Жашылча (загрузка из файла 1С), Для ОТЛ
 // ---------------------------------------------------------------------------
 
 function YugDateBar({ date, onChange }) {
@@ -2259,6 +2261,7 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sa
           onSubmit={sag.onSubmit}
           onUnlock={sag.onUnlock}
           dateLabel={dateLabel}
+          stores={HOLOD_YUG_STORES}
         />
       )}
     </div>
@@ -2370,7 +2373,7 @@ function YugZhashylchaPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRem
                     {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
                   </td>
                   <td className="px-4 py-2">
-                    <StoreSelect disabled={submitted} value={r.store} onChange={(v) => onUpdate(r.id, "store", v)} hasError={Boolean(issues.missingStore)} />
+                    <StoreSelect disabled={submitted} value={r.store} stores={HOLOD_YUG_STORES} onChange={(v) => onUpdate(r.id, "store", v)} hasError={Boolean(issues.missingStore)} />
                     {issues.missingStore && (
                       <div className="text-xs text-rose-600 mt-1">
                         {r.rawStore ? `Магазин не найден по названию «${r.rawStore}» — выберите вручную` : "Выберите магазин"}
@@ -2550,7 +2553,7 @@ function YugTransitPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove
                     {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
                   </td>
                   <td className="px-4 py-2">
-                    <StoreSelect disabled={submitted} value={r.store} onChange={(v) => onUpdate(r.id, "store", v)} hasError={Boolean(issues.missingStore)} />
+                    <StoreSelect disabled={submitted} value={r.store} stores={HOLOD_YUG_STORES} onChange={(v) => onUpdate(r.id, "store", v)} hasError={Boolean(issues.missingStore)} />
                     {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
                   </td>
                   <td className="px-4 py-2">
