@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { STORES_NO_KARAKOL as STORES } from "../data/reference";
+import { HOLOD_YUG_STORES as STORES } from "../data/reference";
 
 // ---------------------------------------------------------------------------
 // Холод Юг: даты отгрузки, загрузка заказов Жашылчи из файла 1С,
