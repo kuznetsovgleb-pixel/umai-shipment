@@ -251,6 +251,25 @@ export const KARAKOL_STORES = [
 ];
 export const STORES_NO_KARAKOL = STORES.filter((s) => !KARAKOL_STORES.includes(s));
 
+// Магазины Холода Юга (ГЛ — Глобус, Д — Достор): на вкладке «Холод Юг» — только они;
+// на складах Садыгалиева (заморозка), Транзит Юг и Жашылча (ночная) в основных вкладках их нет
+const YUG_CODES = [
+  "ГЛ-14","ГЛ-28","ГЛ-31","ГЛ-38","ГЛ-40","ГЛ-41","ГЛ-44","ГЛ-46","ГЛ-48","ГЛ-49","ГЛ-54","ГЛ-57","ГЛ-59",
+  "ГЛ-61","ГЛ-63","ГЛ-66","ГЛ-67","ГЛ-68","ГЛ-70","ГЛ-71","ГЛ-73","ГЛ-74","ГЛ-75","ГЛ-76","ГЛ-77","ГЛ-78",
+  "ГЛ-79","ГЛ-82","ГЛ-84","ГЛ-89","ГЛ-90","ГЛ-91","ГЛ-95",
+  "Д22","Д25","Д27","Д29","Д37","Д39","Д46",
+];
+const yugStoreOf = (code) => {
+  const m = code.match(/^(ГЛ|Д)-?(\d+)$/);
+  const prefix = m[1] === "ГЛ" ? "Глобус" : "Достор";
+  const re = new RegExp(`^${prefix}\\s*${parseInt(m[2], 10)}(\\D|$)`);
+  return STORES_NO_KARAKOL.find((s) => re.test(s));
+};
+export const HOLOD_YUG_STORES = YUG_CODES.map(yugStoreOf).filter(Boolean);
+export const STORES_NO_YUG = STORES_NO_KARAKOL.filter((s) => !HOLOD_YUG_STORES.includes(s));
+// склады основных вкладок, которые есть и на вкладке «Холод Юг»
+export const YUG_WAREHOUSE_IDS = ["sagadalieva_zamorozka", "transit_yug"];
+
 export const STORE_WINDOWS = {
   "Глобус 1": "09:00-17:20",
   "Глобус 2 Сокулук": "09:00-17:20",
