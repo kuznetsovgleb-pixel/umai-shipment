@@ -198,6 +198,7 @@ export const STORES = [
   "РЦ Ак-Орго",
   "РЦ Транзит Север",
   "РЦ Транзит Юг",
+  "РЦ Ош",
   "СП Хлебозавод",
   "ЦО",
   "Цех Глобус СП",
@@ -265,8 +266,10 @@ const yugStoreOf = (code) => {
   const re = new RegExp(`^${prefix}\\s*${parseInt(m[2], 10)}(\\D|$)`);
   return STORES_NO_KARAKOL.find((s) => re.test(s));
 };
-export const HOLOD_YUG_STORES = YUG_CODES.map(yugStoreOf).filter(Boolean);
-export const STORES_NO_YUG = STORES_NO_KARAKOL.filter((s) => !HOLOD_YUG_STORES.includes(s));
+// «РЦ Ош» — доступен на вкладке «Холод Юг» и остаётся в списках остальных вкладок
+const YUG_STORES_BY_CODE = YUG_CODES.map(yugStoreOf).filter(Boolean);
+export const HOLOD_YUG_STORES = [...YUG_STORES_BY_CODE, "РЦ Ош"];
+export const STORES_NO_YUG = STORES_NO_KARAKOL.filter((s) => !YUG_STORES_BY_CODE.includes(s));
 // склады основных вкладок, которые есть и на вкладке «Холод Юг»
 export const YUG_WAREHOUSE_IDS = ["sagadalieva_zamorozka", "transit_yug", "hlebzavod", "kkcp"];
 
@@ -466,6 +469,7 @@ export const STORE_WINDOWS = {
   "РЦ Пригородное": "09:00-17:00",
   "РЦ Мурманская - основной": "09:00-17:00",
   "РЦ Жашылча": "09:00-17:00",
+  "РЦ Ош": "09:00-17:00",
   "РЦ Каракол": "09:00-17:00",
   "РЦ Ак-Орго": "09:00-17:00",
   "РЦ Транзит Север": "09:00-17:00",
