@@ -233,7 +233,9 @@ const consolidateRows = (warehouses, dayData) => {
 // Холод Юг: вспомогательные функции
 // ---------------------------------------------------------------------------
 
-const YUG_SAG_WH = WAREHOUSES.find((w) => w.id === "sagadalieva_zamorozka");
+// склады Холода Юга с той же формой, что и на основных вкладках
+const YUG_WH_IDS = ["sagadalieva_zamorozka", "hlebzavod", "kkcp"];
+const YUG_WHS = YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
 const YUG_TR_NAME = "Транзит Юг";
 const YUG_TR_SHIP_POINT = "РЦ Транзит Юг";
 const YUG_TR_CATEGORIES = ["Заморозка", "Охлажденка"];
@@ -241,6 +243,8 @@ const YUG_STATUS_WHS = [
   { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose" },
   { id: "zhashylcha", name: YUG_ZH_NAME, accent: "cyan" },
   { id: "transit_yug", name: YUG_TR_NAME, accent: "teal" },
+  { id: "hlebzavod", name: "Хлебзавод", accent: "amber" },
+  { id: "kkcp", name: "ККЦП", accent: "violet" },
 ];
 
 const yugHasData = (r) => Boolean(String(r.order || "").trim() || r.store || r.weight || r.volume);
@@ -281,9 +285,9 @@ const mergeYugLines = (rows, lines) => {
   return { rows: next.length ? next : [makeEmptyYugRow()], added, updated };
 };
 
-// плоский список для ОТЛ и выгрузки: Садыгалиева (заморозка) + Жашылча (схлопнутая по магазинам)
+// плоский список для ОТЛ и выгрузки: Садыгалиева (заморозка), Хлебзавод, ККЦП + Жашылча и Транзит Юг (схлопнутые по магазинам)
 const buildYugConsolidated = (yDay) => {
-  const list = consolidateRows([YUG_SAG_WH], yDay);
+  const list = consolidateRows(YUG_WHS, yDay);
   if (yDay.submitted_zhashylcha) {
     collapseYugRows(yDay.rows_zhashylcha || []).forEach((g) => {
       list.push({
@@ -662,23 +666,24 @@ export default function ShipmentApp() {
     [yDate]
   );
 
-  // Садыгалиева (заморозка) в Холод Юг — та же форма, что и на основной вкладке
-  const updateYugSag = (rowId, field, value) =>
-    patchYugRows("sagadalieva_zamorozka", (rows) => rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)));
-  const addYugSag = () => patchYugRows("sagadalieva_zamorozka", (rows) => [...rows, makeEmptyRow()]);
-  const removeYugSag = (rowId) =>
-    patchYugRows("sagadalieva_zamorozka", (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
-  const submitYugSag = async () => {
-    const err = submitCheck(YUG_SAG_WH, yDay.rows_sagadalieva_zamorozka || [], yugSagDuplicates);
+  // Садыгалиева (заморозка), Хлебзавод, ККЦП в Холод Юг — та же форма, что и на основных вкладках
+  const updateYugWh = (whId, rowId, field, value) =>
+    patchYugRows(whId, (rows) => rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)));
+  const addYugWh = (whId) => patchYugRows(whId, (rows) => [...rows, makeEmptyRow()]);
+  const removeYugWh = (whId, rowId) =>
+    patchYugRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
+  const submitYugWh = async (whId) => {
+    const wh = YUG_WHS.find((w) => w.id === whId);
+    const err = submitCheck(wh, yDay[`rows_${whId}`] || [], yugDuplicates);
     if (err) return showToast(err);
     try {
-      await setHolodYugSubmitted(yDate, "sagadalieva_zamorozka", true);
-      showToast("Холод Юг · Садыгалиева (заморозка): данные отправлены в транспортный отдел");
+      await setHolodYugSubmitted(yDate, whId, true);
+      showToast(`Холод Юг · ${wh.name}: данные отправлены в транспортный отдел`);
     } catch {
       showToast("Не удалось отправить — проверьте связь и попробуйте снова");
     }
   };
-  const unlockYugSag = () => setHolodYugSubmitted(yDate, "sagadalieva_zamorozka", false).catch(() => showToast("Не удалось изменить статус"));
+  const unlockYugWh = (whId) => setHolodYugSubmitted(yDate, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
   // Жашылча (Холод Юг): строки из файла 1С + ручные правки
   const updateYugZh = (rowId, field, value) =>
@@ -796,7 +801,7 @@ export default function ShipmentApp() {
   const consolidated = useMemo(() => consolidateRows(WAREHOUSES, day), [day]);
   const karakolConsolidated = useMemo(() => consolidateRows(KARAKOL_WAREHOUSES, kDay), [kDay]);
   const karakolTransfers = useMemo(() => buildKarakolTransfers(date, karakolConsolidated), [date, karakolConsolidated]);
-  const yugSagDuplicates = useMemo(() => findDuplicateOrders([YUG_SAG_WH], yDay), [yDay]);
+  const yugDuplicates = useMemo(() => findDuplicateOrders(YUG_WHS, yDay), [yDay]);
   const yugConsolidated = useMemo(() => buildYugConsolidated(yDay), [yDay]);
 
   const exportExcel = () => {
@@ -889,10 +894,10 @@ export default function ShipmentApp() {
             loading={yLoading}
             sub={yugSub}
             onSubChange={setYugSub}
-            sag={{
-              duplicateOrders: yugSagDuplicates,
-              onUpdate: updateYugSag, onAdd: addYugSag, onRemove: removeYugSag,
-              onSubmit: submitYugSag, onUnlock: unlockYugSag,
+            whp={{
+              duplicateOrders: yugDuplicates,
+              onUpdate: updateYugWh, onAdd: addYugWh, onRemove: removeYugWh,
+              onSubmit: submitYugWh, onUnlock: unlockYugWh,
             }}
             zh={{
               onUpdate: updateYugZh, onAdd: addYugZh, onRemove: removeYugZh,
@@ -1238,7 +1243,6 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
 
 // Переиспользуется и для Каракола: warehouses = склады Каракола, showTransport = false
 // (раздела «Транспорт» там нет), transfers — предпросмотр перемещений РЦ → РЦ Каракол.
-
 function OtlPanel({
   day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhSubmitted,
   karakolDay = null, yugDay = null, yugDateLabel = "", warehouses = WAREHOUSES, showTransport = true, transfers = null, titlePrefix = "",
@@ -2155,8 +2159,8 @@ function ZhashylchaPanel({ date }) {
 }
 
 // ---------------------------------------------------------------------------
-// Холод Юг: своя дата отгрузки (пн, ср, сб) и 3 подвкладки —
-// Садыгалиева (заморозка), Жашылча (загрузка из файла 1С), Для ОТЛ
+// Холод Юг: своя дата отгрузки (пн, ср, сб) и подвкладки —
+// Садыгалиева (заморозка), Жашылча (загрузка из файла 1С), Транзит Юг, Хлебзавод, ККЦП, Для ОТЛ
 // ---------------------------------------------------------------------------
 
 function YugDateBar({ date, onChange }) {
@@ -2185,8 +2189,9 @@ function YugDateBar({ date, onChange }) {
   );
 }
 
-function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sag, zh, tr, consolidated, onExport }) {
+function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, whp, zh, tr, consolidated, onExport }) {
   const dateLabel = fmtDateRu(date);
+  const whId = YUG_WH_IDS.includes(sub) ? sub : "sagadalieva_zamorozka";
   const pill = (active) =>
     `flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
       active ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
@@ -2195,6 +2200,8 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sa
     { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose" },
     { id: "zhashylcha", name: YUG_ZH_NAME, accent: "cyan" },
     { id: "transit_yug", name: YUG_TR_NAME, accent: "teal" },
+    { id: "hlebzavod", name: "Хлебзавод", accent: "amber" },
+    { id: "kkcp", name: "ККЦП", accent: "violet" },
   ];
 
   return (
@@ -2248,18 +2255,18 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, sa
         />
       ) : (
         <WarehousePanel
-          key="yug_sag"
-          wh={YUG_SAG_WH}
+          key={`yug_${whId}`}
+          wh={YUG_WHS.find((w) => w.id === whId)}
           prefix="Холод Юг"
-          rows={yDay.rows_sagadalieva_zamorozka || []}
-          submitted={yDay.submitted_sagadalieva_zamorozka}
-          duplicateOrders={sag.duplicateOrders}
-          onUpdate={sag.onUpdate}
-          onPasteQty={(rowId, field, raw) => sag.onUpdate(rowId, field, sanitizeQty(raw))}
-          onAdd={sag.onAdd}
-          onRemove={sag.onRemove}
-          onSubmit={sag.onSubmit}
-          onUnlock={sag.onUnlock}
+          rows={yDay[`rows_${whId}`] || []}
+          submitted={yDay[`submitted_${whId}`]}
+          duplicateOrders={whp.duplicateOrders}
+          onUpdate={(rowId, field, value) => whp.onUpdate(whId, rowId, field, value)}
+          onPasteQty={(rowId, field, raw) => whp.onUpdate(whId, rowId, field, sanitizeQty(raw))}
+          onAdd={() => whp.onAdd(whId)}
+          onRemove={(rowId) => whp.onRemove(whId, rowId)}
+          onSubmit={() => whp.onSubmit(whId)}
+          onUnlock={() => whp.onUnlock(whId)}
           dateLabel={dateLabel}
           stores={HOLOD_YUG_STORES}
         />
