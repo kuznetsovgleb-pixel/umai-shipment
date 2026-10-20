@@ -274,20 +274,22 @@ export async function setKarakolSubmitted(date, whId, value) {
 
 // ---------------------------------------------------------------------------
 // Холод Юг — коллекция shipments_holod_yug/{YYYY-MM-DD}, где дата — ДАТА ОТГРУЗКИ
-// (понедельник, среда или суббота). Внутри два склада:
-//   sagadalieva_zamorozka — строки как у обычных складов (makeEmptyRow),
+// (понедельник, среда или суббота). Внутри склады:
+//   sagadalieva_zamorozka, hlebzavod, kkcp — строки как у обычных складов (makeEmptyRow),
 //   zhashylcha            — строки из файла 1С: номер, магазин, вес, объём,
 //   transit_yug           — вручную: номер, магазин, вес, товарная группа.
 // Данные копятся до дня отгрузки: на каждую дату отгрузки — свой документ.
 // ---------------------------------------------------------------------------
 
-export const HOLOD_YUG_KEYS = ["sagadalieva_zamorozka", "zhashylcha", "transit_yug"];
+export const HOLOD_YUG_KEYS = ["sagadalieva_zamorozka", "zhashylcha", "transit_yug", "hlebzavod", "kkcp"];
 
 export const makeEmptyYugRow = () => ({
   id: uid(), order: "", store: "", rawStore: "", weight: "", volume: "", category: "",
 });
 
-const emptyYugRowsFor = (key) => [key === "sagadalieva_zamorozka" ? makeEmptyRow() : makeEmptyYugRow()];
+// склады с обычной формой заказов (как на основных вкладках): Садыгалиева (заморозка), Хлебзавод, ККЦП
+const YUG_PLAIN_KEYS = ["sagadalieva_zamorozka", "hlebzavod", "kkcp"];
+const emptyYugRowsFor = (key) => [YUG_PLAIN_KEYS.includes(key) ? makeEmptyRow() : makeEmptyYugRow()];
 
 export const emptyHolodYugDay = () => {
   const day = {};
