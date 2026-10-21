@@ -127,8 +127,10 @@ export async function saveVehicles(date, vehicles) {
 }
 
 // ---------------------------------------------------------------------------
-// Жашылча (ночь) — полностью отдельный контур: своя коллекция в Firestore,
-// свой список машин, всегда привязан к сегодняшней дате (заказы день в день)
+// РЦ Жашылча — отдельный контур: своя коллекция в Firestore, один общий список
+// машин, всегда привязан к сегодняшней дате (заказы день в день).
+// Три формы заказов: «Молоко ночь» (поля rows / submitted — как было раньше),
+// «СОФ» (rows_sof / submitted_sof) и «Молоко день» (rows_milk_day / submitted_milk_day).
 // ---------------------------------------------------------------------------
 
 export const seedZhashylchaVehicles = () =>
@@ -153,8 +155,18 @@ export const seedZhashylchaVehicles = () =>
 export const emptyZhashylchaDay = () => ({
   rows: [makeEmptyRow()],
   submitted: false,
+  rows_sof: [makeEmptyRow()],
+  submitted_sof: false,
+  rows_milk_day: [makeEmptyRow()],
+  submitted_milk_day: false,
   vehicles: seedZhashylchaVehicles(),
 });
+
+// kind: "night" (по умолчанию) — «Молоко ночь», "sof" — «СОФ», "day" — «Молоко день»
+const zhFields = (kind) =>
+  kind === "sof" ? { rows: "rows_sof", submitted: "submitted_sof" } :
+  kind === "day" ? { rows: "rows_milk_day", submitted: "submitted_milk_day" } :
+  { rows: "rows", submitted: "submitted" };
 
 const zhashylchaRef = (date) => doc(db, "shipments_zhashylcha", date);
 
@@ -176,18 +188,18 @@ export function subscribeToZhashylchaDay(date, onChange, onError) {
   );
 }
 
-export async function saveZhashylchaRows(date, rows) {
+export async function saveZhashylchaRows(date, rows, kind = "night") {
   try {
-    await setDoc(zhashylchaRef(date), { rows }, { merge: true });
+    await setDoc(zhashylchaRef(date), { [zhFields(kind).rows]: rows }, { merge: true });
   } catch (err) {
     console.error("[dayStore] saveZhashylchaRows failed", { date }, err);
     throw err;
   }
 }
 
-export async function setZhashylchaSubmitted(date, value) {
+export async function setZhashylchaSubmitted(date, value, kind = "night") {
   try {
-    await setDoc(zhashylchaRef(date), { submitted: value }, { merge: true });
+    await setDoc(zhashylchaRef(date), { [zhFields(kind).submitted]: value }, { merge: true });
   } catch (err) {
     console.error("[dayStore] setZhashylchaSubmitted failed", { date, value }, err);
     throw err;
