@@ -7,11 +7,11 @@ import {
 import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
-  subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
+  subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows,
   emptyKarakolDay, subscribeToKarakolDay, saveKarakolRows, setKarakolSubmitted,
   emptyHolodYugDay, subscribeToHolodYugDay, saveHolodYugRows, setHolodYugSubmitted, makeEmptyYugRow,
 } from "../lib/dayStore";
-import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook } from "../lib/exportExcel";
+import { downloadWorkbook, downloadZhashylchaOrdersWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook } from "../lib/exportExcel";
 import {
   YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort,
   collapseYugRows, parseYugFile, yugPallets,
@@ -476,7 +476,7 @@ export default function ShipmentApp() {
   const [loadingDay, setLoadingDay] = useState(true);
   const [toast, setToast] = useState(null);
   const [activeTab, setActiveTab] = useState("prigorodnoe");
-  const [zhSubmitted, setZhSubmitted] = useState(false);
+  const [zhStatus, setZhStatus] = useState({ night: false, day: false, sof: false });
   // Каракол: отдельная коллекция, следует календарю сверху
   const [kDay, setKDay] = useState(emptyKarakolDay());
   const [kLoading, setKLoading] = useState(true);
@@ -492,7 +492,7 @@ export default function ShipmentApp() {
   useEffect(() => {
     const unsub = subscribeToZhashylchaDay(
       todayISO(),
-      (data) => setZhSubmitted(Boolean(data.submitted)),
+      (data) => setZhStatus({ night: Boolean(data.submitted), day: Boolean(data.submitted_milk_day), sof: Boolean(data.submitted_sof) }),
       () => {}
     );
     return unsub;
@@ -955,7 +955,7 @@ export default function ShipmentApp() {
             onRemoveVehicle={removeVehicle}
             onExport={exportExcel}
             dateLabel={fmtDateRu(date)}
-            zhSubmitted={zhSubmitted}
+            zhStatus={zhStatus}
             karakolDay={kDay}
             yugDay={yDay}
             yugDateLabel={fmtDateRu(yDate)}
@@ -1244,7 +1244,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
 // Переиспользуется и для Каракола: warehouses = склады Каракола, showTransport = false
 // (раздела «Транспорт» там нет), transfers — предпросмотр перемещений РЦ → РЦ Каракол.
 function OtlPanel({
-  day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhSubmitted,
+  day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhStatus,
   karakolDay = null, yugDay = null, yugDateLabel = "", warehouses = WAREHOUSES, showTransport = true, transfers = null, titlePrefix = "",
 }) {
   const totalPallets = consolidated.reduce((s, r) => s + r.total, 0);
@@ -1267,11 +1267,15 @@ function OtlPanel({
             </div>
           );
         })}
-        {zhSubmitted !== undefined && (
-          <div className="flex items-center gap-1.5 text-sm font-medium border-l border-stone-200 pl-6">
-            {zhSubmitted ? <CheckCircle2 size={15} className="text-cyan-700" /> : <Circle size={15} className="text-stone-300" />}
-            <span className={zhSubmitted ? "text-stone-900" : "text-stone-400"}>РЦ Жашылча - молочка (ночь)</span>
-            <span className={`text-xs ${zhSubmitted ? "text-cyan-700" : "text-stone-400"}`}>{zhSubmitted ? "отправлено" : "ожидание"}</span>
+        {zhStatus !== undefined && (
+          <div className="flex items-center gap-6 flex-wrap border-l border-stone-200 pl-6">
+            {[{ id: "sof", name: "РЦ Жашылча · СОФ", sub: zhStatus.sof }, { id: "day", name: "РЦ Жашылча · Молоко день", sub: zhStatus.day }, { id: "night", name: "РЦ Жашылча · Молоко ночь", sub: zhStatus.night }].map((w) => (
+              <div key={w.id} className="flex items-center gap-1.5 text-sm font-medium">
+                {w.sub ? <CheckCircle2 size={15} className="text-cyan-700" /> : <Circle size={15} className="text-stone-300" />}
+                <span className={w.sub ? "text-stone-900" : "text-stone-400"}>{w.name}</span>
+                <span className={`text-xs ${w.sub ? "text-cyan-700" : "text-stone-400"}`}>{w.sub ? "отправлено" : "ожидание"}</span>
+              </div>
+            ))}
           </div>
         )}
         {karakolDay && (
@@ -1648,16 +1652,170 @@ function KarakolPanel({
 }
 
 // ---------------------------------------------------------------------------
-// Жашылча (ночь) — полностью отдельный контур: свой склад, свой список ТС,
-// своя выгрузка, всегда на сегодняшнюю дату (заказы подаются день в день)
+// РЦ Жашылча — отдельный контур: две формы заказов (СОФ и Молоко, день и ночь
+// вместе), общие ТС, одна общая выгрузка, всегда на сегодняшнюю дату
+// (заказы подаются день в день)
 // ---------------------------------------------------------------------------
 
 const ZH_SHIP_POINT = "РЦ Жашылча";
 const ZH_GROUP = "Охлажденка";
-const ZH_DISPLAY_NAME = "РЦ Жашылча - молочка (ночь)";
-const ZH_START_OPTIONS = ["РЦ Жашылча", "Центральный офис", "РЦ Пригородное", "РЦ Ак-Орго", "РЦ РМ и ПТО", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка"];
-// Жашылча работает ночью — своя, более поздняя шкала времени погрузки
-const ZH_LOAD_TIME_OPTIONS = ["18:00", "19:00", "20:00", "21:00", "22:00", "23:00"];
+const ZH_DISPLAY_NAME = "РЦ Жашылча";
+// три формы заказов: СОФ, Молоко день, Молоко ночь. «Молоко ночь» хранится в старых
+// полях rows / submitted — прежние данные не теряются.
+// Выгрузки (только лист Orders): «день» — Молоко день; «ночь» — СОФ + Молоко ночь
+const ZH_FORMS = [
+  { id: "sof", name: "СОФ", rowsKey: "rows_sof", submittedKey: "submitted_sof", part: "night" },
+  { id: "day", name: "Молоко день", rowsKey: "rows_milk_day", submittedKey: "submitted_milk_day", part: "day" },
+  { id: "night", name: "Молоко ночь", rowsKey: "rows", submittedKey: "submitted", part: "night" },
+];
+const ZH_PARTS = [
+  { id: "day", name: "Дневная выгрузка", note: "Молоко день" },
+  { id: "night", name: "Ночная выгрузка", note: "СОФ + Молоко ночь" },
+];
+const emptyZhDay = () => ({
+  rows: [makeEmptyRow()], submitted: false,
+  rows_sof: [makeEmptyRow()], submitted_sof: false,
+  rows_milk_day: [makeEmptyRow()], submitted_milk_day: false,
+});
+
+// блок ввода заказов одной формы (СОФ или Молоко)
+function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpdate, onAdd, onRemove, onSubmit, onUnlock, dateLabel }) {
+  const duplicateStores = useMemo(() => findDuplicateStores(rows), [rows]);
+  const locked = !canEdit || submitted;
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-cyan-700 mb-1">
+            <span className="h-2 w-2 rounded-full bg-cyan-500" /> Склад · {ZH_DISPLAY_NAME} · {title}
+          </div>
+          <p className="text-sm text-stone-500">
+            Заказ №, количество евро- и американских паллет (шаг 0,5), коробок и вес на {dateLabel}. Магазин выбирается из списка.
+            Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее).
+                      </p>
+        </div>
+      </div>
+
+      {submitted && (
+        <div className="mb-4 flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
+          <div className="flex items-center gap-2 text-sm text-stone-700">
+            <Lock size={15} className="text-stone-500" /> Данные за {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
+          </div>
+          {canEdit && (
+            <button onClick={onUnlock} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900 whitespace-nowrap">
+              Вернуть на редактирование
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+              <th className="text-left font-semibold px-4 py-3 w-10">#</th>
+              <th className="text-left font-semibold px-4 py-3 w-40">Заказ №</th>
+              <th className="text-left font-semibold px-4 py-3">Магазин</th>
+              <th className="text-left font-semibold px-4 py-3 w-28">Евро</th>
+              <th className="text-left font-semibold px-4 py-3 w-28">Американцы</th>
+              <th className="text-left font-semibold px-4 py-3 w-28">Коробки</th>
+              <th className="text-left font-semibold px-4 py-3 w-28">Вес, кг</th>
+              <th className="px-4 py-3 w-10" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
+              const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
+              const issues = rowIssues(r, true, "euroAmericanBoxes");
+              const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
+              const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
+              return (
+                <tr key={r.id} className="border-t border-stone-100 align-top">
+                  <td className="px-4 py-2 text-stone-400 font-mono text-xs pt-2.5">{i + 1}</td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" disabled={locked} value={r.order}
+                      onChange={(e) => onUpdate(r.id, "order", e.target.value)}
+                      placeholder="напр. 100234"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${isDupe || issues.missingOrder ? errBorder : okBorder}`}
+                    />
+                    {isDupe && <div className="text-xs text-rose-600 mt-1">Номер дублируется</div>}
+                    {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <StoreSelect
+                      disabled={locked} value={r.store} stores={STORES_NO_YUG}
+                      onChange={(v) => onUpdate(r.id, "store", v)}
+                      hasError={Boolean(issues.missingStore || isDupeStore)}
+                    />
+                    {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
+                    {!issues.missingStore && isDupeStore && <div className="text-xs text-rose-600 mt-1">На этот магазин уже есть заказ — проверьте дубли</div>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="decimal" disabled={locked} value={r.euro}
+                      onChange={(e) => onUpdate(r.id, "euro", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="decimal" disabled={locked} value={r.american}
+                      onChange={(e) => onUpdate(r.id, "american", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                    />
+                    {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите евро, американца или коробки</div>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="numeric" disabled={locked} value={r.boxes}
+                      onChange={(e) => onUpdate(r.id, "boxes", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                    />
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="decimal" disabled={locked} value={r.weight}
+                      onChange={(e) => onUpdate(r.id, "weight", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingWeight ? errBorder : okBorder}`}
+                    />
+                    {issues.missingWeight && <div className="text-xs text-rose-600 mt-1">Укажите вес</div>}
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    {!locked && (
+                      <button onClick={() => onRemove(r.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!locked && (
+          <button onClick={onAdd} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
+            <Plus size={15} /> Добавить заказ
+          </button>
+        )}
+      </div>
+
+      {!locked && (
+        <div className="flex justify-end mt-4">
+          <button onClick={onSubmit} className="flex items-center gap-2 bg-cyan-600 text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:opacity-90 transition-opacity shadow-sm">
+            <Send size={15} /> Отправить в транспортный отдел
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ZhashylchaPanel({ date }) {
   // дата ввода всегда «сегодня» — эта вкладка просто следует за календариком
@@ -1666,11 +1824,14 @@ function ZhashylchaPanel({ date }) {
   const today = todayISO();
   const isToday = zhDate === today;
   const isFuture = zhDate > today;
-  
-  const [zhDay, setZhDay] = useState({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
+
+  const [zhDay, setZhDay] = useState(emptyZhDay());
   const [zhLoading, setZhLoading] = useState(true);
+  const [sub, setSub] = useState("night");
   const [toast, setToast] = useState(null);
   const saveTimers = useRef({});
+  // запасной пустой список для старых документов, где «СОФ» ещё не создан
+  const fallbackRows = useMemo(() => [makeEmptyRow()], []);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -1680,7 +1841,7 @@ function ZhashylchaPanel({ date }) {
   useEffect(() => {
     // будущая дата — заказы день в день, туда ещё рано, базу не трогаем вообще
     if (zhDate > todayISO()) {
-      setZhDay({ rows: [makeEmptyRow()], submitted: false, vehicles: [] });
+      setZhDay(emptyZhDay());
       setZhLoading(false);
       return;
     }
@@ -1688,15 +1849,7 @@ function ZhashylchaPanel({ date }) {
     const unsub = subscribeToZhashylchaDay(
       zhDate,
       (data) => {
-        // самовосстановление списка машин — только для сегодняшнего дня;
-        // для архивных дат ничего не досоздаём, это просто просмотр истории
-        if (zhDate === todayISO() && (!data.vehicles || data.vehicles.length === 0)) {
-          const seeded = seedZhashylchaVehicles();
-          setZhDay({ ...data, vehicles: seeded });
-          saveZhashylchaVehicles(zhDate, seeded).catch(() => {});
-        } else {
-          setZhDay(data);
-        }
+        setZhDay(data);
         setZhLoading(false);
       },
       () => setZhLoading(false)
@@ -1704,37 +1857,42 @@ function ZhashylchaPanel({ date }) {
     return unsub;
   }, [zhDate]);
 
-  const rows = zhDay.rows || [];
+  const formOf = (kind) => ZH_FORMS.find((f) => f.id === kind);
+  const rowsOf = (kind) => zhDay[formOf(kind).rowsKey] || fallbackRows;
+  const submittedOf = (kind) => Boolean(zhDay[formOf(kind).submittedKey]);
 
+  // номера заказов не должны повторяться ни внутри формы, ни между СОФ и Молоком
   const duplicateOrders = useMemo(() => {
     const counts = {};
-    rows.forEach((r) => {
-      const key = r.order.trim().toLowerCase();
-      if (!key) return;
-      counts[key] = (counts[key] || 0) + 1;
+    ZH_FORMS.forEach((f) => {
+      (zhDay[f.rowsKey] || []).forEach((r) => {
+        const key = r.order.trim().toLowerCase();
+        if (!key) return;
+        counts[key] = (counts[key] || 0) + 1;
+      });
     });
     return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
-  }, [rows]);
-  const duplicateStores = useMemo(() => findDuplicateStores(rows), [rows]);
+  }, [zhDay]);
 
   const patchRows = useCallback(
-    (updater) => {
+    (kind, updater) => {
+      const f = ZH_FORMS.find((x) => x.id === kind);
       setZhDay((current) => {
-        const nextRows = updater(current.rows || []);
-        const next = { ...current, rows: nextRows };
-        const key = "rows";
+        const nextRows = updater(current[f.rowsKey] || fallbackRows);
+        const next = { ...current, [f.rowsKey]: nextRows };
+        const key = f.rowsKey;
         if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
         saveTimers.current[key] = setTimeout(() => {
-          saveZhashylchaRows(zhDate, nextRows).catch(() => showToast("Не удалось сохранить — проверьте связь"));
+          saveZhashylchaRows(zhDate, nextRows, kind).catch(() => showToast("Не удалось сохранить — проверьте связь"));
         }, 500);
         return next;
       });
     },
-    [zhDate]
+    [zhDate, fallbackRows]
   );
 
-  const updateRow = (rowId, field, value) => {
-    patchRows((rs) =>
+  const updateRow = (kind, rowId, field, value) => {
+    patchRows(kind, (rs) =>
       rs.map((r) => {
         if (r.id !== rowId) return r;
         let v = value;
@@ -1745,11 +1903,12 @@ function ZhashylchaPanel({ date }) {
       })
     );
   };
-  const addRow = () => patchRows((rs) => [...rs, makeEmptyRow()]);
-  const removeRow = (rowId) => patchRows((rs) => (rs.length > 1 ? rs.filter((r) => r.id !== rowId) : rs));
+  const addRow = (kind) => patchRows(kind, (rs) => [...rs, makeEmptyRow()]);
+  const removeRow = (kind, rowId) => patchRows(kind, (rs) => (rs.length > 1 ? rs.filter((r) => r.id !== rowId) : rs));
 
-  const submitZh = async () => {
-    const filled = rows.filter((r) => rowIssues(r, true, "euroAmericanBoxes").hasData);
+  const submitZh = async (kind) => {
+    const form = formOf(kind);
+    const filled = rowsOf(kind).filter((r) => rowIssues(r, true, "euroAmericanBoxes").hasData);
     if (filled.length === 0) return showToast("Нет заполненных строк для отправки");
     const incompleteCount = filled.filter((r) => rowIssues(r, true, "euroAmericanBoxes").incomplete).length;
     if (incompleteCount > 0) {
@@ -1766,63 +1925,46 @@ function ZhashylchaPanel({ date }) {
     if (hasDupeStore) return showToast("На один магазин может быть только один заказ — исправьте повторяющиеся магазины");
 
     try {
-      await setZhashylchaSubmitted(zhDate, true);
-      showToast(`${ZH_DISPLAY_NAME}: данные отправлены в транспортный отдел`);
+      await setZhashylchaSubmitted(zhDate, true, kind);
+      showToast(`${ZH_DISPLAY_NAME} · ${form.name}: данные отправлены в транспортный отдел`);
     } catch {
       showToast("Не удалось отправить — проверьте связь и попробуйте снова");
     }
   };
-  const unlockZh = () => setZhashylchaSubmitted(zhDate, false).catch(() => showToast("Не удалось изменить статус"));
+  const unlockZh = (kind) => setZhashylchaSubmitted(zhDate, false, kind).catch(() => showToast("Не удалось изменить статус"));
 
-  const patchVehicles = useCallback(
-    (updater) => {
-      setZhDay((current) => {
-        const next = { ...current, vehicles: updater(current.vehicles || []) };
-        const key = "vehicles";
-        if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
-        saveTimers.current[key] = setTimeout(() => {
-          saveZhashylchaVehicles(zhDate, next.vehicles).catch(() => showToast("Не удалось сохранить — проверьте связь"));
-        }, 500);
-        return next;
-      });
-    },
-    [zhDate]
-  );
-  const addVehicle = () =>
-    patchVehicles((vs) => [
-      ...vs,
-      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "УмайГрупп", pallets: "", tons: "", skills: "", from: "21:00", to: "19:00", start: ZH_SHIP_POINT, bodyType: "РЕФ", gb: false, maxPoints: "", custom: true, ready: false },
-    ]);
-  const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
-  const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
+  // списки для ОТЛ и выгрузки (только отправленные формы), две выгрузки:
+  // «день» — Молоко день; «ночь» — СОФ + Молоко ночь
+  const consolidatedByPart = useMemo(() => {
+    const res = { day: [], night: [] };
+    ZH_FORMS.forEach((f) => {
+      if (!zhDay[f.submittedKey]) return;
+      (zhDay[f.rowsKey] || [])
+        .filter((r) => r.order.trim())
+        .forEach((r) => {
+          const euro = parseFloat(r.euro) || 0;
+          const american = parseFloat(r.american) || 0;
+          const boxes = parseInt(r.boxes, 10) || 0;
+          const weight = parseFloat(r.weight) || 0;
+          res[f.part].push({
+            id: `${f.id}_${r.id}`, source: f.name, order: r.order.trim(), store: r.store || "—",
+            euro, american, boxes,
+            total: Math.round((euro + american * EURO_AMERICAN_COEF + boxesToPallets(boxes)) * 100) / 100,
+            weight: Math.round(weight * 100) / 100,
+            shipPoint: ZH_SHIP_POINT,
+            unloadSec: PALLET_UNLOAD_SEC,
+            group: ZH_GROUP,
+          });
+        });
+    });
+    return res;
+  }, [zhDay]);
 
-  const consolidated = useMemo(() => {
-    if (!zhDay.submitted) return [];
-    return rows
-      .filter((r) => r.order.trim())
-      .map((r) => {
-        const euro = parseFloat(r.euro) || 0;
-        const american = parseFloat(r.american) || 0;
-        const boxes = parseInt(r.boxes, 10) || 0;
-        const weight = parseFloat(r.weight) || 0;
-        return {
-          id: r.id, order: r.order.trim(), store: r.store || "—",
-          euro, american, boxes,
-          total: Math.round((euro + american * EURO_AMERICAN_COEF + boxesToPallets(boxes)) * 100) / 100,
-          weight: Math.round(weight * 100) / 100,
-          shipPoint: ZH_SHIP_POINT,
-          unloadSec: PALLET_UNLOAD_SEC,
-          group: ZH_GROUP,
-        };
-      });
-  }, [zhDay.submitted, rows]);
-
-  const exportZh = () => {
-    if (consolidated.length === 0) return showToast("Нет данных для выгрузки — сначала отправьте заказы");
-    const readyCount = (zhDay.vehicles || []).length && (zhDay.vehicles || []).filter((v) => v.ready).length;
-    if (!readyCount) return showToast("Сначала проставьте готовность хотя бы одного ТС");
-    downloadZhashylchaWorkbook(zhDate, consolidated, zhDay.vehicles || []);
-    showToast("Файл сформирован и скачан");
+  const exportZh = (part) => {
+    const list = consolidatedByPart[part];
+    if (list.length === 0) return showToast("Нет данных для выгрузки — сначала отправьте заказы");
+    downloadZhashylchaOrdersWorkbook(zhDate, list, part);
+    showToast(part === "day" ? "Дневная выгрузка сформирована и скачана" : "Ночная выгрузка сформирована и скачана");
   };
 
   const dateLabel = fmtDateRu(zhDate);
@@ -1849,305 +1991,128 @@ function ZhashylchaPanel({ date }) {
     );
   }
 
+  const pill = (active) =>
+    `flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
+      active ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
+    }`;
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       <div className="bg-cyan-50 border border-cyan-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-cyan-800">
         <Moon size={14} />
         {isToday
-          ? `Отдельный контур: свой список заказов, свои ТС и своя выгрузка — не пересекается с остальными складами. Всегда дата «сегодня» (${dateLabel}), заказы подаются день в день.`
+          ? `Отдельный контур: свои списки заказов (СОФ, Молоко день, Молоко ночь) и две выгрузки для ОТЛ — не пересекается с остальными складами. Всегда дата «сегодня» (${dateLabel}), заказы подаются день в день.`
           : `Архив за ${dateLabel} — только просмотр. Ввод и редактирование доступны исключительно на сегодняшний день (${fmtDateRu(today)}).`}
       </div>
 
-      {/* ---- блок склада: ввод заказов ---- */}
-      <div>
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <div className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-cyan-700 mb-1">
-              <span className="h-2 w-2 rounded-full bg-cyan-500" /> Склад · {ZH_DISPLAY_NAME}
-            </div>
-            <p className="text-sm text-stone-500">
-              Заказ №, количество евро- и американских паллет (шаг 0,5), коробок и вес на {dateLabel}. Магазин выбирается из списка.
-              Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее).
-            </p>
-          </div>
-        </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        {ZH_FORMS.map((f) => {
+          const submitted = submittedOf(f.id);
+          const active = sub === f.id;
+          return (
+            <button key={f.id} onClick={() => setSub(f.id)} className={pill(active)}>
+              <span className={`h-1.5 w-1.5 rounded-full ${submitted ? ACCENT.cyan.dot : "bg-stone-300"}`} />
+              {f.name}
+              {submitted && <Lock size={12} className={active ? "text-stone-300" : "text-stone-400"} />}
+            </button>
+          );
+        })}
+        <button onClick={() => setSub("otl")} className={pill(sub === "otl")}>
+          <Truck size={14} /> Для ОТЛ (Жашылча)
+        </button>
+      </div>
 
-        {zhDay.submitted && (
-          <div className="mb-4 flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
-            <div className="flex items-center gap-2 text-sm text-stone-700">
-              <Lock size={15} className="text-stone-500" /> Данные за {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
-            </div>
-            {isToday && (
-              <button onClick={unlockZh} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900 whitespace-nowrap">
-                Вернуть на редактирование
-              </button>
-            )}
-          </div>
-        )}
+      {sub !== "otl" ? (
+        <ZhOrdersBlock
+          key={sub}
+          title={formOf(sub).name}
+          rows={rowsOf(sub)}
+          submitted={submittedOf(sub)}
+          canEdit={isToday}
+          duplicateOrders={duplicateOrders}
+          onUpdate={(rowId, field, value) => updateRow(sub, rowId, field, value)}
+          onAdd={() => addRow(sub)}
+          onRemove={(rowId) => removeRow(sub, rowId)}
+          onSubmit={() => submitZh(sub)}
+          onUnlock={() => unlockZh(sub)}
+          dateLabel={dateLabel}
+        />
+      ) : (
+        <div className="space-y-8">
+          {ZH_PARTS.map((part) => {
+            const list = consolidatedByPart[part.id];
+            return (
+              <div key={part.id}>
+                <div className="flex items-center justify-between mb-3 gap-3">
+                  <div>
+                    <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
+                      Для ОТЛ · {ZH_DISPLAY_NAME} · {part.name} ({part.note}) — {dateLabel} · {list.length} заказ(ов)
+                    </h2>
+                    <p className="text-xs text-stone-400 mt-0.5">
+                      Итого = евро + американцы × {EURO_AMERICAN_COEF} + коробки (по ступеням 20/40) · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · точка отгрузки: {ZH_SHIP_POINT} · товарная группа: {ZH_GROUP} · в файле только лист Orders
+                    </p>
+                  </div>
+                  <button onClick={() => exportZh(part.id)} className="flex items-center gap-2 bg-stone-900 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-stone-700 transition-colors whitespace-nowrap">
+                    <Download size={15} /> Скачать в Excel
+                  </button>
+                </div>
 
-        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
-                <th className="text-left font-semibold px-4 py-3 w-10">#</th>
-                <th className="text-left font-semibold px-4 py-3 w-40">Заказ №</th>
-                <th className="text-left font-semibold px-4 py-3">Магазин</th>
-                <th className="text-left font-semibold px-4 py-3 w-28">Евро</th>
-                <th className="text-left font-semibold px-4 py-3 w-28">Американцы</th>
-                <th className="text-left font-semibold px-4 py-3 w-28">Коробки</th>
-                <th className="text-left font-semibold px-4 py-3 w-28">Вес, кг</th>
-                <th className="px-4 py-3 w-10" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r, i) => {
-                const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
-                const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
-                const issues = rowIssues(r, true, "euroAmericanBoxes");
-                const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
-                const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
-                return (
-                  <tr key={r.id} className="border-t border-stone-100 align-top">
-                    <td className="px-4 py-2 text-stone-400 font-mono text-xs pt-2.5">{i + 1}</td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="text" disabled={!isToday || zhDay.submitted} value={r.order}
-                        onChange={(e) => updateRow(r.id, "order", e.target.value)}
-                        placeholder="напр. 100234"
-                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${isDupe || issues.missingOrder ? errBorder : okBorder}`}
-                      />
-                      {isDupe && <div className="text-xs text-rose-600 mt-1">Номер дублируется</div>}
-                      {!isDupe && issues.missingOrder && <div className="text-xs text-rose-600 mt-1">Укажите номер заказа</div>}
-                    </td>
-                    <td className="px-4 py-2">
-                      <StoreSelect
-                        disabled={!isToday || zhDay.submitted} value={r.store} stores={STORES_NO_YUG}
-                        onChange={(v) => updateRow(r.id, "store", v)}
-                        hasError={Boolean(issues.missingStore || isDupeStore)}
-                      />
-                      {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
-                      {!issues.missingStore && isDupeStore && <div className="text-xs text-rose-600 mt-1">На этот магазин уже есть заказ — проверьте дубли</div>}
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="text" inputMode="decimal" disabled={!isToday || zhDay.submitted} value={r.euro}
-                        onChange={(e) => updateRow(r.id, "euro", e.target.value)}
-                        placeholder="0"
-                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="text" inputMode="decimal" disabled={!isToday || zhDay.submitted} value={r.american}
-                        onChange={(e) => updateRow(r.id, "american", e.target.value)}
-                        placeholder="0"
-                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
-                      />
-                      {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите евро, американца или коробки</div>}
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="text" inputMode="numeric" disabled={!isToday || zhDay.submitted} value={r.boxes}
-                        onChange={(e) => updateRow(r.id, "boxes", e.target.value)}
-                        placeholder="0"
-                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
-                      />
-                    </td>
-                    <td className="px-4 py-2">
-                      <input
-                        type="text" inputMode="decimal" disabled={!isToday || zhDay.submitted} value={r.weight}
-                        onChange={(e) => updateRow(r.id, "weight", e.target.value)}
-                        placeholder="0"
-                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingWeight ? errBorder : okBorder}`}
-                      />
-                      {issues.missingWeight && <div className="text-xs text-rose-600 mt-1">Укажите вес</div>}
-                    </td>
-                    <td className="px-4 py-2 text-center">
-                      {isToday && !zhDay.submitted && (
-                        <button onClick={() => removeRow(r.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
-                          <Trash2 size={16} />
-                        </button>
+                <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+                        <th className="text-left font-semibold px-4 py-3">Заказ №</th>
+                        <th className="text-left font-semibold px-4 py-3">Форма</th>
+                        <th className="text-left font-semibold px-4 py-3">Магазин</th>
+                        <th className="text-right font-semibold px-4 py-3">Евро</th>
+                        <th className="text-right font-semibold px-4 py-3">Американцы</th>
+                        <th className="text-right font-semibold px-4 py-3">Коробки</th>
+                        <th className="text-right font-semibold px-4 py-3">Итого</th>
+                        <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {list.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-4 py-10 text-center text-sm text-stone-400">
+                            Пока нет отправленных данных. Ждём кнопку «Отправить в транспортный отдел» во вкладках: {part.note}.
+                          </td>
+                        </tr>
+                      ) : (
+                        list.map((r) => (
+                          <tr key={r.id} className="border-t border-stone-100">
+                            <td className="px-4 py-2 font-mono">{r.order}</td>
+                            <td className="px-4 py-2 text-xs font-semibold text-cyan-700">{r.source}</td>
+                            <td className="px-4 py-2 text-stone-700">{r.store}</td>
+                            <td className="px-4 py-2 text-right font-mono text-stone-600">{r.euro}</td>
+                            <td className="px-4 py-2 text-right font-mono text-stone-600">{r.american}</td>
+                            <td className="px-4 py-2 text-right font-mono text-stone-600">{r.boxes}</td>
+                            <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{r.total}</td>
+                            <td className="px-4 py-2 text-right font-mono text-stone-600">{r.weight}</td>
+                          </tr>
+                        ))
                       )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {isToday && !zhDay.submitted && (
-            <button onClick={addRow} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
-              <Plus size={15} /> Добавить заказ
-            </button>
-          )}
-        </div>
-
-        {isToday && !zhDay.submitted && (
-          <div className="flex justify-end mt-4">
-            <button onClick={submitZh} className="flex items-center gap-2 bg-cyan-600 text-white text-sm font-semibold px-5 py-2.5 rounded-lg hover:opacity-90 transition-opacity shadow-sm">
-              <Send size={15} /> Отправить в транспортный отдел
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* ---- блок ОТЛ: консолидация + машины + выгрузка ---- */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500">
-              Для ОТЛ · {ZH_DISPLAY_NAME} — {dateLabel} · {consolidated.length} заказ(ов)
-            </h2>
-            <p className="text-xs text-stone-400 mt-0.5">
-              Итого = евро + американцы × {EURO_AMERICAN_COEF} + коробки (по ступеням 20/40) · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · товарная группа: {ZH_GROUP}
-            </p>
-          </div>
-          <button onClick={exportZh} className="flex items-center gap-2 bg-stone-900 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-stone-700 transition-colors">
-            <Download size={15} /> Скачать в Excel
-          </button>
-        </div>
-
-        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden mb-6">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
-                <th className="text-left font-semibold px-4 py-3">Заказ №</th>
-                <th className="text-left font-semibold px-4 py-3">Магазин</th>
-                <th className="text-right font-semibold px-4 py-3">Евро</th>
-                <th className="text-right font-semibold px-4 py-3">Американцы</th>
-                <th className="text-right font-semibold px-4 py-3">Коробки</th>
-                <th className="text-right font-semibold px-4 py-3">Итого</th>
-                <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
-              </tr>
-            </thead>
-            <tbody>
-              {consolidated.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-stone-400">
-                    Пока нет отправленных данных. Ждём кнопку «Отправить в транспортный отдел» выше.
-                  </td>
-                </tr>
-              ) : (
-                consolidated.map((r) => (
-                  <tr key={r.id} className="border-t border-stone-100">
-                    <td className="px-4 py-2 font-mono">{r.order}</td>
-                    <td className="px-4 py-2 text-stone-700">{r.store}</td>
-                    <td className="px-4 py-2 text-right font-mono text-stone-600">{r.euro}</td>
-                    <td className="px-4 py-2 text-right font-mono text-stone-600">{r.american}</td>
-                    <td className="px-4 py-2 text-right font-mono text-stone-600">{r.boxes}</td>
-                    <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{r.total}</td>
-                    <td className="px-4 py-2 text-right font-mono text-stone-600">{r.weight}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-            {consolidated.length > 0 && (
-              <tfoot>
-                <tr className="border-t border-stone-200 bg-stone-50">
-                  <td colSpan={5} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
-                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">
-                    {Math.round(consolidated.reduce((s, r) => s + r.total, 0) * 100) / 100}
-                  </td>
-                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">
-                    {Math.round(consolidated.reduce((s, r) => s + r.weight, 0) * 100) / 100}
-                  </td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-        </div>
-
-        <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-3">Транспорт ({ZH_DISPLAY_NAME})</h3>
-        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
-          <table className="w-full text-sm min-w-[880px]">
-            <thead>
-              <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
-                <th className="text-left font-semibold px-4 py-3 w-32">Госномер</th>
-                <th className="text-left font-semibold px-4 py-3 w-44">Точка старта</th>
-                <th className="text-right font-semibold px-4 py-3 w-24">Вместим., палл.</th>
-                <th className="text-right font-semibold px-4 py-3 w-24">Грузопод-ть, т</th>
-                <th className="text-left font-semibold px-4 py-3 w-24">ГБ</th>
-                <th className="text-right font-semibold px-4 py-3 w-24">Точек доставки</th>
-                <th className="text-left font-semibold px-4 py-3 w-24">Погрузка с</th>
-                <th className="text-left font-semibold px-4 py-3 w-32">Готов на завтра</th>
-                <th className="px-4 py-3 w-10" />
-              </tr>
-            </thead>
-            <tbody>
-              {(zhDay.vehicles || []).map((v) => (
-                <tr key={v.id} className="border-t border-stone-100">
-                  <td className="px-4 py-2">
-                    <input type="text" disabled={!isToday || !v.custom} value={v.plate} onChange={(e) => updateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
-                  </td>
-                  <td className="px-4 py-2">
-                    <select
-                      disabled={!isToday}
-                      value={v.start || ""}
-                      onChange={(e) => updateVehicle(v.id, "start", e.target.value)}
-                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
-                    >
-                      <option value="">— выбрать точку —</option>
-                      {ZH_START_OPTIONS.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    <input type="text" inputMode="numeric" disabled={!isToday} value={v.pallets} onChange={(e) => updateVehicle(v.id, "pallets", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input type="text" inputMode="numeric" disabled={!isToday} value={v.tons} onChange={(e) => updateVehicle(v.id, "tons", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
-                  </td>
-                  <td className="px-4 py-2">
-                    <button
-                      disabled={!isToday}
-                      onClick={() => updateVehicle(v.id, "gb", !v.gb)}
-                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors disabled:opacity-50 ${v.gb ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
-                    >
-                      {v.gb ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.gb ? "Есть" : "Нет"}
-                    </button>
-                  </td>
-                  <td className="px-4 py-2">
-                    <input type="text" inputMode="numeric" disabled={!isToday} value={v.maxPoints} onChange={(e) => updateVehicle(v.id, "maxPoints", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
-                  </td>
-                  <td className="px-4 py-2">
-                    <select
-                      disabled={!isToday}
-                      value={v.from || "21:00"}
-                      onChange={(e) => updateVehicle(v.id, "from", e.target.value)}
-                      className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
-                    >
-                      {ZH_LOAD_TIME_OPTIONS.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    <button
-                      disabled={!isToday}
-                      onClick={() => updateVehicle(v.id, "ready", !v.ready)}
-                      className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors disabled:opacity-50 ${v.ready ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
-                    >
-                      {v.ready ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.ready ? "Готов" : "Не готов"}
-                    </button>
-                  </td>
-                  <td className="px-4 py-2 text-center">
-                    {isToday && (
-                      <button onClick={() => removeVehicle(v.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
-                        <Trash2 size={16} />
-                      </button>
+                    </tbody>
+                    {list.length > 0 && (
+                      <tfoot>
+                        <tr className="border-t border-stone-200 bg-stone-50">
+                          <td colSpan={6} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">
+                            {Math.round(list.reduce((s, r) => s + r.total, 0) * 100) / 100}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">
+                            {Math.round(list.reduce((s, r) => s + r.weight, 0) * 100) / 100}
+                          </td>
+                        </tr>
+                      </tfoot>
                     )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {isToday && (
-            <button onClick={addVehicle} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
-              <Plus size={15} /> Добавить ТС
-            </button>
-          )}
+                  </table>
+                </div>
+              </div>
+            );
+          })}
         </div>
-      </div>
+      )}
 
       {toast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-stone-900 text-white text-sm font-medium px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
