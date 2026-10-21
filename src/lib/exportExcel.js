@@ -86,6 +86,13 @@ export function downloadZhashylchaWorkbook(dateIso, consolidated, vehicles) {
   XLSX.writeFile(wb, `TMS_import_zhashylcha_${dateIso}.xlsx`);
 }
 
+// РЦ Жашылча — две выгрузки только с листом Orders (без Vehicles и Магазины):
+// «день» (Молоко день) и «ночь» (СОФ + Молоко ночь)
+export function downloadZhashylchaOrdersWorkbook(dateIso, consolidated, part) {
+  const wb = buildHolodYugWorkbook(dateIso, consolidated);
+  XLSX.writeFile(wb, `TMS_import_zhashylcha_${part}_${dateIso}.xlsx`);
+}
+
 // ---------------------------------------------------------------------------
 // Каракол — отдельная выгрузка: только лист Orders (без Vehicles и Магазины).
 //  1) заказы магазинов Каракола: точка отгрузки = "РЦ Каракол";
