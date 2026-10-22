@@ -15,9 +15,9 @@ export const YUG_ZH_NAME = "Жашылча";
 export const YUG_PALLET_KG = 500;
 export const YUG_PALLET_M3 = 1;
 
-// ---- даты отгрузки: понедельник, среда, суббота ----
+// ---- даты отгрузки: понедельник, среда, пятница, суббота ----
 
-export const YUG_SHIP_WEEKDAYS = [1, 3, 6]; // 0 = воскресенье
+export const YUG_SHIP_WEEKDAYS = [1, 3, 5, 6]; // 0 = воскресенье
 
 const parseISO = (iso) => {
   const [y, m, d] = iso.split("-").map(Number);
