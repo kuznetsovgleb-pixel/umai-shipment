@@ -7,7 +7,7 @@ import {
 import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
-  subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows,
+  subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
   emptyKarakolDay, subscribeToKarakolDay, saveKarakolRows, setKarakolSubmitted,
   emptyHolodYugDay, subscribeToHolodYugDay, saveHolodYugRows, setHolodYugSubmitted, makeEmptyYugRow,
 } from "../lib/dayStore";
@@ -481,7 +481,7 @@ export default function ShipmentApp() {
   const [kDay, setKDay] = useState(emptyKarakolDay());
   const [kLoading, setKLoading] = useState(true);
   const [karakolSub, setKarakolSub] = useState("prigorodnoe");
-  // Холод Юг: свой календарь (только пн, ср, сб) и своя коллекция
+  // Холод Юг: свой календарь (пн, ср, пт, сб) и своя коллекция
   const [yDate, setYDate] = useState(() => nextShipDate(todayISO()));
   const [yDay, setYDay] = useState(emptyHolodYugDay());
   const [yLoading, setYLoading] = useState(true);
@@ -646,7 +646,7 @@ export default function ShipmentApp() {
   const changeYugDate = (iso) => {
     if (!iso) return;
     const snapped = nextShipDate(iso);
-    if (snapped !== iso) showToast(`Отгрузка бывает только по пн, ср и сб — выбрана ближайшая: ${fmtDateRu(snapped)}`);
+    if (snapped !== iso) showToast(`Отгрузка бывает только по пн, ср, пт и сб — выбрана ближайшая: ${fmtDateRu(snapped)}`);
     setYDate(snapped);
   };
 
@@ -1660,6 +1660,10 @@ function KarakolPanel({
 const ZH_SHIP_POINT = "РЦ Жашылча";
 const ZH_GROUP = "Охлажденка";
 const ZH_DISPLAY_NAME = "РЦ Жашылча";
+const ZH_START_OPTIONS = ["РЦ Жашылча", "Центральный офис", "РЦ Пригородное", "РЦ Ак-Орго", "РЦ РМ и ПТО", "РЦ Садыгалиева - сыпучка", "РЦ Садыгалиева - заморозка"];
+// машины работают и днём, и ночью — шкала времени погрузки на весь день
+const ZH_LOAD_TIME_OPTIONS = Array.from({ length: 16 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
+
 // три формы заказов: СОФ, Молоко день, Молоко ночь. «Молоко ночь» хранится в старых
 // полях rows / submitted — прежние данные не теряются.
 // Выгрузки (только лист Orders): «день» — Молоко день; «ночь» — СОФ + Молоко ночь
@@ -1676,6 +1680,7 @@ const emptyZhDay = () => ({
   rows: [makeEmptyRow()], submitted: false,
   rows_sof: [makeEmptyRow()], submitted_sof: false,
   rows_milk_day: [makeEmptyRow()], submitted_milk_day: false,
+  vehicles: [],
 });
 
 // блок ввода заказов одной формы (СОФ или Молоко)
@@ -1849,7 +1854,15 @@ function ZhashylchaPanel({ date }) {
     const unsub = subscribeToZhashylchaDay(
       zhDate,
       (data) => {
-        setZhDay(data);
+        // самовосстановление списка машин — только для сегодняшнего дня;
+        // для архивных дат ничего не досоздаём, это просто просмотр истории
+        if (zhDate === todayISO() && (!data.vehicles || data.vehicles.length === 0)) {
+          const seeded = seedZhashylchaVehicles();
+          setZhDay({ ...data, vehicles: seeded });
+          saveZhashylchaVehicles(zhDate, seeded).catch(() => {});
+        } else {
+          setZhDay(data);
+        }
         setZhLoading(false);
       },
       () => setZhLoading(false)
@@ -1933,6 +1946,28 @@ function ZhashylchaPanel({ date }) {
   };
   const unlockZh = (kind) => setZhashylchaSubmitted(zhDate, false, kind).catch(() => showToast("Не удалось изменить статус"));
 
+  const patchVehicles = useCallback(
+    (updater) => {
+      setZhDay((current) => {
+        const next = { ...current, vehicles: updater(current.vehicles || []) };
+        const key = "vehicles";
+        if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+        saveTimers.current[key] = setTimeout(() => {
+          saveZhashylchaVehicles(zhDate, next.vehicles).catch(() => showToast("Не удалось сохранить — проверьте связь"));
+        }, 500);
+        return next;
+      });
+    },
+    [zhDate]
+  );
+  const addVehicle = () =>
+    patchVehicles((vs) => [
+      ...vs,
+      { id: Math.random().toString(36).slice(2, 10), extId: "", plate: "", carrier: "УмайГрупп", pallets: "", tons: "", skills: "", from: "21:00", to: "19:00", start: ZH_SHIP_POINT, bodyType: "РЕФ", gb: false, maxPoints: "", custom: true, ready: false },
+    ]);
+  const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
+  const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
+
   // списки для ОТЛ и выгрузки (только отправленные формы), две выгрузки:
   // «день» — Молоко день; «ночь» — СОФ + Молоко ночь
   const consolidatedByPart = useMemo(() => {
@@ -1963,7 +1998,9 @@ function ZhashylchaPanel({ date }) {
   const exportZh = (part) => {
     const list = consolidatedByPart[part];
     if (list.length === 0) return showToast("Нет данных для выгрузки — сначала отправьте заказы");
-    downloadZhashylchaOrdersWorkbook(zhDate, list, part);
+    const readyCount = (zhDay.vehicles || []).filter((v) => v.ready).length;
+    if (!readyCount) return showToast("Сначала проставьте готовность хотя бы одного ТС");
+    downloadZhashylchaOrdersWorkbook(zhDate, list, part, zhDay.vehicles || []);
     showToast(part === "day" ? "Дневная выгрузка сформирована и скачана" : "Ночная выгрузка сформирована и скачана");
   };
 
@@ -2049,7 +2086,7 @@ function ZhashylchaPanel({ date }) {
                       Для ОТЛ · {ZH_DISPLAY_NAME} · {part.name} ({part.note}) — {dateLabel} · {list.length} заказ(ов)
                     </h2>
                     <p className="text-xs text-stone-400 mt-0.5">
-                      Итого = евро + американцы × {EURO_AMERICAN_COEF} + коробки (по ступеням 20/40) · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · точка отгрузки: {ZH_SHIP_POINT} · товарная группа: {ZH_GROUP} · в файле только лист Orders
+                      Итого = евро + американцы × {EURO_AMERICAN_COEF} + коробки (по ступеням 20/40) · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · точка отгрузки: {ZH_SHIP_POINT} · товарная группа: {ZH_GROUP} · в файле листы Orders, Vehicles и «Магазины»; ТС — общий список ниже
                     </p>
                   </div>
                   <button onClick={() => exportZh(part.id)} className="flex items-center gap-2 bg-stone-900 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-stone-700 transition-colors whitespace-nowrap">
@@ -2111,6 +2148,100 @@ function ZhashylchaPanel({ date }) {
               </div>
             );
           })}
+
+          <div>
+            <h3 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-3">Транспорт ({ZH_DISPLAY_NAME})</h3>
+            <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+              <table className="w-full text-sm min-w-[880px]">
+                <thead>
+                  <tr className="bg-stone-50 text-stone-500 text-xs uppercase tracking-wide">
+                    <th className="text-left font-semibold px-4 py-3 w-32">Госномер</th>
+                    <th className="text-left font-semibold px-4 py-3 w-44">Точка старта</th>
+                    <th className="text-right font-semibold px-4 py-3 w-24">Вместим., палл.</th>
+                    <th className="text-right font-semibold px-4 py-3 w-24">Грузопод-ть, т</th>
+                    <th className="text-left font-semibold px-4 py-3 w-24">ГБ</th>
+                    <th className="text-right font-semibold px-4 py-3 w-24">Точек доставки</th>
+                    <th className="text-left font-semibold px-4 py-3 w-24">Погрузка с</th>
+                    <th className="text-left font-semibold px-4 py-3 w-32">Готов на завтра</th>
+                    <th className="px-4 py-3 w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {(zhDay.vehicles || []).map((v) => (
+                    <tr key={v.id} className="border-t border-stone-100">
+                      <td className="px-4 py-2">
+                        <input type="text" disabled={!isToday || !v.custom} value={v.plate} onChange={(e) => updateVehicle(v.id, "plate", e.target.value)} placeholder="Госномер" className="w-full font-mono text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
+                      </td>
+                      <td className="px-4 py-2">
+                        <select
+                          disabled={!isToday}
+                          value={v.start || ""}
+                          onChange={(e) => updateVehicle(v.id, "start", e.target.value)}
+                          className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
+                        >
+                          <option value="">— выбрать точку —</option>
+                          {ZH_START_OPTIONS.map((s) => (
+                            <option key={s} value={s}>{s}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-2">
+                        <input type="text" inputMode="numeric" disabled={!isToday} value={v.pallets} onChange={(e) => updateVehicle(v.id, "pallets", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
+                      </td>
+                      <td className="px-4 py-2">
+                        <input type="text" inputMode="numeric" disabled={!isToday} value={v.tons} onChange={(e) => updateVehicle(v.id, "tons", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
+                      </td>
+                      <td className="px-4 py-2">
+                        <button
+                          disabled={!isToday}
+                          onClick={() => updateVehicle(v.id, "gb", !v.gb)}
+                          className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors disabled:opacity-50 ${v.gb ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
+                        >
+                          {v.gb ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.gb ? "Есть" : "Нет"}
+                        </button>
+                      </td>
+                      <td className="px-4 py-2">
+                        <input type="text" inputMode="numeric" disabled={!isToday} value={v.maxPoints} onChange={(e) => updateVehicle(v.id, "maxPoints", sanitizeQty(e.target.value))} placeholder="0" className="w-full font-mono text-sm text-right rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 disabled:bg-stone-50 disabled:text-stone-400" />
+                      </td>
+                      <td className="px-4 py-2">
+                        <select
+                          disabled={!isToday}
+                          value={v.from || "21:00"}
+                          onChange={(e) => updateVehicle(v.id, "from", e.target.value)}
+                          className="w-full text-sm rounded-md border border-stone-300 px-2 py-1.5 outline-none focus:ring-2 focus:ring-stone-400 bg-white disabled:bg-stone-50 disabled:text-stone-400"
+                        >
+                          {ZH_LOAD_TIME_OPTIONS.map((t) => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-4 py-2">
+                        <button
+                          disabled={!isToday}
+                          onClick={() => updateVehicle(v.id, "ready", !v.ready)}
+                          className={`flex items-center gap-2 text-sm font-semibold px-3 py-1.5 rounded-full transition-colors disabled:opacity-50 ${v.ready ? "bg-emerald-100 text-emerald-700" : "bg-stone-100 text-stone-400"}`}
+                        >
+                          {v.ready ? <CheckCircle2 size={14} /> : <Circle size={14} />} {v.ready ? "Готов" : "Не готов"}
+                        </button>
+                      </td>
+                      <td className="px-4 py-2 text-center">
+                        {isToday && (
+                          <button onClick={() => removeVehicle(v.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {isToday && (
+                <button onClick={addVehicle} className="w-full flex items-center justify-center gap-2 text-sm font-semibold text-stone-500 hover:text-stone-800 hover:bg-stone-50 py-3 border-t border-stone-100 transition-colors">
+                  <Plus size={15} /> Добавить ТС
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -2124,7 +2255,7 @@ function ZhashylchaPanel({ date }) {
 }
 
 // ---------------------------------------------------------------------------
-// Холод Юг: своя дата отгрузки (пн, ср, сб) и подвкладки —
+// Холод Юг: своя дата отгрузки (пн, ср, пт, сб) и подвкладки —
 // Садыгалиева (заморозка), Жашылча (загрузка из файла 1С), Транзит Юг, Хлебзавод, ККЦП, Для ОТЛ
 // ---------------------------------------------------------------------------
 
@@ -2148,7 +2279,7 @@ function YugDateBar({ date, onChange }) {
         Ближайшая
       </button>
       <span className="text-xs text-stone-400">
-        Отгрузка по пн, ср и сб. Заявки вводят накануне и копят до дня отгрузки; новый пустой список открывается со следующей датой отгрузки.
+        Отгрузка по пн, ср, пт и сб. Заявки вводят накануне и копят до дня отгрузки; новый пустой список открывается со следующей датой отгрузки.
       </span>
     </div>
   );
