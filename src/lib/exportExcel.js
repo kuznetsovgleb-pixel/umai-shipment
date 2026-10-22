@@ -86,10 +86,10 @@ export function downloadZhashylchaWorkbook(dateIso, consolidated, vehicles) {
   XLSX.writeFile(wb, `TMS_import_zhashylcha_${dateIso}.xlsx`);
 }
 
-// РЦ Жашылча — две выгрузки только с листом Orders (без Vehicles и Магазины):
-// «день» (Молоко день) и «ночь» (СОФ + Молоко ночь)
-export function downloadZhashylchaOrdersWorkbook(dateIso, consolidated, part) {
-  const wb = buildHolodYugWorkbook(dateIso, consolidated);
+// РЦ Жашылча — две выгрузки: «день» (Молоко день) и «ночь» (СОФ + Молоко ночь).
+// Формат как у Жашылчи: Orders, Vehicles (без «Время погрузки ТС, по») и Магазины
+export function downloadZhashylchaOrdersWorkbook(dateIso, consolidated, part, vehicles) {
+  const wb = buildWorkbook(dateIso, consolidated, vehicles, { hideLoadToTime: true });
   XLSX.writeFile(wb, `TMS_import_zhashylcha_${part}_${dateIso}.xlsx`);
 }
 
