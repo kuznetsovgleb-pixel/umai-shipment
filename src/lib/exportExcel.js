@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { STORES, STORE_WINDOWS, POINT_UNLOAD_SEC, KARAKOL_POINT, KARAKOL_WAREHOUSE_IDS } from "../data/reference";
+import { STORES, STORE_WINDOWS, ZHASHYLCHA_NIGHT_STORES, POINT_UNLOAD_SEC, KARAKOL_POINT, KARAKOL_WAREHOUSE_IDS } from "../data/reference";
 
 const fmtDateRu = (iso) => {
   if (!iso) return "";
@@ -16,6 +16,12 @@ const fmtDateCompact = (iso) => {
 
 // скиллы для выгрузки: только "5т" (для ТС грузоподъёмностью до 5т включительно)
 // и "ГБ" (если у машины есть гидроборт)
+// ISO-дата + n дней (без сдвигов часовых поясов)
+const addDaysIso = (iso, n) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+};
+
 const composeSkills = (tons, gb) => {
   const parts = [];
   if (tons && Number(tons) <= 5) parts.push("5т");
@@ -33,12 +39,17 @@ export function buildWorkbook(dateIso, consolidated, vehicles, options = {}) {
     "Время на разгрузку, сек (на единицу груза)", "Время на разгрузку, сек (на точку)",
     "Товарная группа",
   ];
-  const ordersRows = consolidated.map((r) => [
-    `${r.order}_${dateSuffix}`, dateLabel, r.shipPoint, r.store,
-    r.total, "Паллета", r.weight,
-    r.unloadSec, POINT_UNLOAD_SEC,
-    r.group || "",
-  ]);
+  // options.nextDayExcept — набор магазинов, у которых дата остаётся текущей; остальным +1 день
+  const ordersRows = consolidated.map((r) => {
+    const shifted = Boolean(options.nextDayExcept) && !options.nextDayExcept.has(r.store);
+    const dIso = shifted ? addDaysIso(dateIso, 1) : dateIso;
+    return [
+      `${r.order}_${fmtDateCompact(dIso)}`, fmtDateRu(dIso), r.shipPoint, r.store,
+      r.total, "Паллета", r.weight,
+      r.unloadSec, POINT_UNLOAD_SEC,
+      r.group || "",
+    ];
+  });
 
   // Жашылча: без столбца «Время погрузки ТС, по» (только время начала погрузки)
   const vehiclesHeader = [
@@ -82,7 +93,10 @@ export function downloadWorkbook(dateIso, consolidated, vehicles) {
 // Жашылча (ночь) — отдельная выгрузка: тот же формат, но без столбца
 // «Время погрузки ТС, по» на листе Vehicles
 export function downloadZhashylchaWorkbook(dateIso, consolidated, vehicles) {
-  const wb = buildWorkbook(dateIso, consolidated, vehicles, { hideLoadToTime: true });
+  const wb = buildWorkbook(dateIso, consolidated, vehicles, {
+    hideLoadToTime: true,
+    nextDayExcept: new Set(ZHASHYLCHA_NIGHT_STORES),
+  });
   XLSX.writeFile(wb, `TMS_import_zhashylcha_${dateIso}.xlsx`);
 }
 
