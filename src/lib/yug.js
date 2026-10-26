@@ -108,28 +108,41 @@ const codeOf = (s) => {
   return m ? `${m[1]}${parseInt(m[2], 10)}` : null;
 };
 
-const BY_SQUASH = new Map();
-const BY_CODE = new Map();
-STORES.forEach((s) => {
-  BY_SQUASH.set(squash(s), s);
-  const c = codeOf(s);
-  if (c) {
-    if (!BY_CODE.has(c)) BY_CODE.set(c, []);
-    BY_CODE.get(c).push(s);
-  }
-});
+// индекс магазинов для подбора по названию: по умолчанию — магазины Холода Юга;
+// для других вкладок (например, РЦ Жашылча) передаётся свой список
+const buildIndex = (list) => {
+  const bySquash = new Map();
+  const byCode = new Map();
+  list.forEach((s) => {
+    bySquash.set(squash(s), s);
+    const c = codeOf(s);
+    if (c) {
+      if (!byCode.has(c)) byCode.set(c, []);
+      byCode.get(c).push(s);
+    }
+  });
+  return { bySquash, byCode };
+};
+const DEFAULT_INDEX = buildIndex(STORES);
+const indexCache = new WeakMap();
+const indexFor = (list) => {
+  if (!list || list === STORES) return DEFAULT_INDEX;
+  if (!indexCache.has(list)) indexCache.set(list, buildIndex(list));
+  return indexCache.get(list);
+};
 
 // 1) точное совпадение (без учёта регистра, пробелов и дефисов);
 // 2) по коду: «Глобус14 Ош-Нурзаман» → «Глобус14», «SPAR-05 Атыр» → «SPAR-05 Атыр»;
 // не нашли или несколько кандидатов — возвращаем "", магазин выберут вручную
-export const matchStore = (rawName) => {
+export const matchStore = (rawName, storeList) => {
+  const { bySquash, byCode } = indexFor(storeList);
   const name = String(rawName || "").trim();
   if (!name) return "";
-  const exact = BY_SQUASH.get(squash(name));
+  const exact = bySquash.get(squash(name));
   if (exact) return exact;
   const c = codeOf(name);
-  if (c && BY_CODE.has(c)) {
-    let cands = BY_CODE.get(c);
+  if (c && byCode.has(c)) {
+    let cands = byCode.get(c);
     if (cands.length > 1) {
       const wantsSp = /(^|\s)сп$/.test(normName(name));
       cands = cands.filter((s) => /(^|\s)СП$/.test(s) === wantsSp);
@@ -165,7 +178,7 @@ const toNum = (v) => {
 
 // Ожидаемые столбцы: «Номер ERP», «Контрагент», «Общая масса», «Общий объём»
 // (+ первый столбец с датой отгрузки). Строка «Итого» и пустые строки пропускаются.
-export function parseYugFile(arrayBuffer) {
+export function parseYugFile(arrayBuffer, storeList) {
   let wb;
   try {
     wb = XLSX.read(arrayBuffer, { type: "array", cellDates: false });
@@ -210,7 +223,7 @@ export function parseYugFile(arrayBuffer) {
     lines.push({
       order,
       rawName,
-      store: matchStore(rawName),
+      store: matchStore(rawName, storeList),
       weight: round3(toNum(r[col.weight])),
       volume: round3(toNum(r[col.volume])),
     });
