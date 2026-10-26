@@ -271,6 +271,8 @@ const yugStoreOf = (code) => {
 const YUG_STORES_BY_CODE = YUG_CODES.map(yugStoreOf).filter(Boolean);
 export const HOLOD_YUG_STORES = [...YUG_STORES_BY_CODE, "РЦ Ош"];
 export const STORES_NO_YUG = STORES_NO_KARAKOL.filter((s) => !YUG_STORES_BY_CODE.includes(s));
+// РЦ Жашылча: все магазины, включая каракольские, кроме 40 южных (они в Холод Юг)
+export const STORES_ZHASHYLCHA = STORES.filter((s) => !YUG_STORES_BY_CODE.includes(s));
 // склады основных вкладок, которые есть и на вкладке «Холод Юг»
 export const YUG_WAREHOUSE_IDS = ["sagadalieva_zamorozka", "transit_yug", "hlebzavod", "kkcp"];
 
