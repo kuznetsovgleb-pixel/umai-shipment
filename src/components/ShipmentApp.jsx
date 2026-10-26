@@ -4,7 +4,7 @@ import {
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
   Snowflake, Upload, ChevronLeft, ChevronRight,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
@@ -1746,7 +1746,7 @@ function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpd
                   </td>
                   <td className="px-4 py-2">
                     <StoreSelect
-                      disabled={locked} value={r.store} stores={STORES_NO_YUG}
+                      disabled={locked} value={r.store} stores={STORES_ZHASHYLCHA}
                       onChange={(v) => onUpdate(r.id, "store", v)}
                       hasError={Boolean(issues.missingStore || isDupeStore)}
                     />
@@ -1939,7 +1939,7 @@ function ZhashylchaPanel({ date }) {
     } catch {
       return showToast("Не удалось прочитать файл");
     }
-    const res = parseYugFile(buf, STORES_NO_YUG);
+    const res = parseYugFile(buf, STORES_ZHASHYLCHA);
     if (res.error) return showToast(res.error);
     const merged = mergeYugLines(rowsMilk, res.lines);
     patchRows("milk", () => merged.rows);
@@ -2101,7 +2101,7 @@ function ZhashylchaPanel({ date }) {
           rows={rowsMilk}
           submitted={submittedMilk}
           readOnly={!isToday}
-          stores={STORES_NO_YUG}
+          stores={STORES_ZHASHYLCHA}
           heading={`${ZH_DISPLAY_NAME} · Молоко`}
           description={`Заказы на ${dateLabel}: загрузите файл из 1С или добавьте строки вручную. Магазин подбирается по названию, а если не нашёлся — выберите из списка. Заказы одного магазина объединяются в один (вес и объём суммируются). Паллеты: до 500 кг и до 1 м³ — одна паллета, больше по весу или объёму — несколько. Точка отгрузки — ${ZH_SHIP_POINT}, группа — ${ZH_GROUP}.`}
           dateLabel={dateLabel}
