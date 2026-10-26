@@ -129,8 +129,10 @@ export async function saveVehicles(date, vehicles) {
 // ---------------------------------------------------------------------------
 // РЦ Жашылча — отдельный контур: своя коллекция в Firestore, один общий список
 // машин, всегда привязан к сегодняшней дате (заказы день в день).
-// Три формы заказов: «Молоко ночь» (поля rows / submitted — как было раньше),
-// «СОФ» (rows_sof / submitted_sof) и «Молоко день» (rows_milk_day / submitted_milk_day).
+// Две формы заказов: «Молоко» (rows_milk / submitted_milk — строки из файла 1С: номер,
+// магазин, вес, объём) и «СОФ» (rows_sof / submitted_sof — ручной ввод, без выгрузки).
+// Список на дату D подаётся до 11:00 дня D (доставка с 18:00 D до 18:00 D+1).
+// Старые поля rows / submitted (прежняя форма «Молоко») остаются в базе, но не используются.
 // ---------------------------------------------------------------------------
 
 export const seedZhashylchaVehicles = () =>
@@ -157,16 +159,14 @@ export const emptyZhashylchaDay = () => ({
   submitted: false,
   rows_sof: [makeEmptyRow()],
   submitted_sof: false,
-  rows_milk_day: [makeEmptyRow()],
-  submitted_milk_day: false,
+  rows_milk: [makeEmptyYugRow()],
+  submitted_milk: false,
   vehicles: seedZhashylchaVehicles(),
 });
 
-// kind: "night" (по умолчанию) — «Молоко ночь», "sof" — «СОФ», "day" — «Молоко день»
+// kind: "milk" (по умолчанию) — «Молоко», "sof" — «СОФ»
 const zhFields = (kind) =>
-  kind === "sof" ? { rows: "rows_sof", submitted: "submitted_sof" } :
-  kind === "day" ? { rows: "rows_milk_day", submitted: "submitted_milk_day" } :
-  { rows: "rows", submitted: "submitted" };
+  kind === "sof" ? { rows: "rows_sof", submitted: "submitted_sof" } : { rows: "rows_milk", submitted: "submitted_milk" };
 
 const zhashylchaRef = (date) => doc(db, "shipments_zhashylcha", date);
 
@@ -188,7 +188,7 @@ export function subscribeToZhashylchaDay(date, onChange, onError) {
   );
 }
 
-export async function saveZhashylchaRows(date, rows, kind = "night") {
+export async function saveZhashylchaRows(date, rows, kind = "milk") {
   try {
     await setDoc(zhashylchaRef(date), { [zhFields(kind).rows]: rows }, { merge: true });
   } catch (err) {
@@ -197,7 +197,7 @@ export async function saveZhashylchaRows(date, rows, kind = "night") {
   }
 }
 
-export async function setZhashylchaSubmitted(date, value, kind = "night") {
+export async function setZhashylchaSubmitted(date, value, kind = "milk") {
   try {
     await setDoc(zhashylchaRef(date), { [zhFields(kind).submitted]: value }, { merge: true });
   } catch (err) {
