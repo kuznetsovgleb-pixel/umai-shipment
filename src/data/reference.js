@@ -617,6 +617,26 @@ export const KARAKOL_POINT = "РЦ Каракол";
 export const KARAKOL_WAREHOUSE_IDS = ["prigorodnoe", "argo", "pto", "sagadalieva", "transit_sever"];
 export const KARAKOL_WAREHOUSES = KARAKOL_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
 
+// ---------------------------------------------------------------------------
+// РЦ Базар-Коргон и РЦ Ош — по логике Каракола: склады подают заказы магазинов региона,
+// в выгрузке заказы магазинов + перемещения «РЦ склада → РЦ региона». Свои коллекции.
+// Список магазинов — как в «Холод Юг» (у Оша без самого «РЦ Ош»).
+// ---------------------------------------------------------------------------
+export const REGION_WAREHOUSE_IDS = ["prigorodnoe", "argo", "pto", "sagadalieva", "transit_yug"];
+export const BAZAR_KORGON_POINT = "РЦ Базар-Коргон";
+export const OSH_POINT = "РЦ Ош";
+export const BAZAR_KORGON_STORES = HOLOD_YUG_STORES;
+export const OSH_STORES = HOLOD_YUG_STORES.filter((s) => s !== OSH_POINT);
+
+// ---------------------------------------------------------------------------
+// Север — склады с обычной формой заказов, любая дата, своя коллекция.
+// (РЦ Жашылча — Молоко/СОФ — подключается в этой же вкладке отдельным блоком.)
+// Список магазинов пока — каракольские.
+// ---------------------------------------------------------------------------
+export const SEVER_WAREHOUSE_IDS = ["sagadalieva_zamorozka", "kkcp", "hlebzavod"];
+export const SEVER_STORES = KARAKOL_STORES;
+
+
 // итог на ГМ = паллеты + роллкейджи × коэффициент
 export const COEFFICIENT = 0.72;
 
