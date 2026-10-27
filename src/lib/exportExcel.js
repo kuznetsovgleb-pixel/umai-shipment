@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { STORES, STORE_WINDOWS, ZHASHYLCHA_NIGHT_STORES, POINT_UNLOAD_SEC, KARAKOL_POINT, KARAKOL_WAREHOUSE_IDS } from "../data/reference";
+import { STORES, STORE_WINDOWS, ZHASHYLCHA_NIGHT_STORES, POINT_UNLOAD_SEC, KARAKOL_POINT, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, BAZAR_KORGON_POINT, OSH_POINT } from "../data/reference";
 
 const fmtDateRu = (iso) => {
   if (!iso) return "";
@@ -133,18 +133,20 @@ const pickGroup = (rows) => {
   return best;
 };
 
-export function buildKarakolTransfers(dateIso, consolidated) {
+// Перемещения «РЦ склада → РЦ региона». prefix — начало номера перемещения (у каждого
+// региона свой, чтобы номера не пересекались): Каракол 003, Базар-Коргон 004, Ош 005.
+export function buildRegionTransfers(dateIso, consolidated, { point, whIds, prefix }) {
   const dateSuffix = fmtDateCompact(dateIso);
   const transfers = [];
-  KARAKOL_WAREHOUSE_IDS.forEach((whId, idx) => {
+  whIds.forEach((whId, idx) => {
     const rows = consolidated.filter((r) => r.whId === whId);
     if (rows.length === 0) return;
     transfers.push({
       whId,
       warehouse: rows[0].warehouse,
-      order: `003${dateSuffix}${idx + 1}`,
+      order: `${prefix}${dateSuffix}${idx + 1}`,
       shipPoint: rows[0].shipPoint, // РЦ склада
-      store: KARAKOL_POINT,
+      store: point,
       ordersCount: rows.length,
       total: round2(rows.reduce((s, r) => s + r.total, 0)),
       weight: round2(rows.reduce((s, r) => s + r.weight, 0)),
@@ -155,7 +157,7 @@ export function buildKarakolTransfers(dateIso, consolidated) {
   return transfers;
 }
 
-export function buildKarakolWorkbook(dateIso, consolidated) {
+export function buildRegionWorkbook(dateIso, consolidated, cfg) {
   const dateLabel = fmtDateRu(dateIso);
   const dateSuffix = fmtDateCompact(dateIso);
 
@@ -167,13 +169,13 @@ export function buildKarakolWorkbook(dateIso, consolidated) {
   ];
 
   const storeRows = consolidated.map((r) => [
-    `${r.order}_${dateSuffix}`, dateLabel, KARAKOL_POINT, r.store,
+    `${r.order}_${dateSuffix}`, dateLabel, cfg.point, r.store,
     r.total, "Паллета", r.weight,
     r.unloadSec, POINT_UNLOAD_SEC,
     r.group || "",
   ]);
 
-  const transferRows = buildKarakolTransfers(dateIso, consolidated).map((t) => [
+  const transferRows = buildRegionTransfers(dateIso, consolidated, cfg).map((t) => [
     t.order, dateLabel, t.shipPoint, t.store,
     t.total, "Паллета", t.weight,
     t.unloadSec, POINT_UNLOAD_SEC,
@@ -185,9 +187,24 @@ export function buildKarakolWorkbook(dateIso, consolidated) {
   return wb;
 }
 
+const KARAKOL_CFG = { point: KARAKOL_POINT, whIds: KARAKOL_WAREHOUSE_IDS, prefix: "003" };
+export const BAZAR_KORGON_CFG = { point: BAZAR_KORGON_POINT, whIds: REGION_WAREHOUSE_IDS, prefix: "004" };
+export const OSH_CFG = { point: OSH_POINT, whIds: REGION_WAREHOUSE_IDS, prefix: "005" };
+
+export const buildKarakolTransfers = (dateIso, consolidated) => buildRegionTransfers(dateIso, consolidated, KARAKOL_CFG);
+export const buildBazarKorgonTransfers = (dateIso, consolidated) => buildRegionTransfers(dateIso, consolidated, BAZAR_KORGON_CFG);
+export const buildOshTransfers = (dateIso, consolidated) => buildRegionTransfers(dateIso, consolidated, OSH_CFG);
+
+export const buildKarakolWorkbook = (dateIso, consolidated) => buildRegionWorkbook(dateIso, consolidated, KARAKOL_CFG);
+
 export function downloadKarakolWorkbook(dateIso, consolidated) {
-  const wb = buildKarakolWorkbook(dateIso, consolidated);
-  XLSX.writeFile(wb, `TMS_import_karakol_${dateIso}.xlsx`);
+  XLSX.writeFile(buildKarakolWorkbook(dateIso, consolidated), `TMS_import_karakol_${dateIso}.xlsx`);
+}
+export function downloadBazarKorgonWorkbook(dateIso, consolidated) {
+  XLSX.writeFile(buildRegionWorkbook(dateIso, consolidated, BAZAR_KORGON_CFG), `TMS_import_bazar_korgon_${dateIso}.xlsx`);
+}
+export function downloadOshWorkbook(dateIso, consolidated) {
+  XLSX.writeFile(buildRegionWorkbook(dateIso, consolidated, OSH_CFG), `TMS_import_osh_${dateIso}.xlsx`);
 }
 
 // ---------------------------------------------------------------------------
@@ -221,4 +238,9 @@ export function buildHolodYugWorkbook(dateIso, consolidated) {
 export function downloadHolodYugWorkbook(dateIso, consolidated) {
   const wb = buildHolodYugWorkbook(dateIso, consolidated);
   XLSX.writeFile(wb, `TMS_import_holod_yug_${dateIso}.xlsx`);
+}
+
+// Север — стандартная выгрузка, только лист Orders (точка отгрузки — склад заказа)
+export function downloadSeverWorkbook(dateIso, consolidated) {
+  XLSX.writeFile(buildHolodYugWorkbook(dateIso, consolidated), `TMS_import_sever_${dateIso}.xlsx`);
 }
