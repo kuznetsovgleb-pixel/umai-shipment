@@ -12,7 +12,7 @@ import {
   emptyHolodYugDay, subscribeToHolodYugDay, saveHolodYugRows, setHolodYugSubmitted, makeEmptyYugRow,
   emptyBazarKorgonDay, subscribeToBazarKorgonDay, saveBazarKorgonRows, setBazarKorgonSubmitted,
   emptyOshDay, subscribeToOshDay, saveOshRows, setOshSubmitted,
-  emptySeverDay, subscribeToSeverDay, saveSeverRows, setSeverSubmitted,
+  emptySeverDay, subscribeToSeverDay, saveSeverRows, setSeverSubmitted, SEVER_ZH_KEYS,
 } from "../lib/dayStore";
 import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook, buildBazarKorgonTransfers, buildOshTransfers, downloadBazarKorgonWorkbook, downloadOshWorkbook, downloadSeverWorkbook } from "../lib/exportExcel";
 import {
@@ -121,7 +121,7 @@ const findDuplicateStores = (rows) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "karakol", "bazar_korgon", "osh", "sever", "holod_yug", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "karakol", "bazar_korgon", "osh", "sever", "holod_yug", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -241,7 +241,13 @@ const YUG_WH_IDS = ["sagadalieva_zamorozka", "hlebzavod", "kkcp"];
 const YUG_WHS = YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
 const REGION_WHS = REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
 const SEVER_WHS = SEVER_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
+const SEVER_ZH_FORMS = [
+  { id: "zh_milk", name: "Жашылча · Молоко", accent: "cyan" },
+  { id: "zh_sof", name: "Жашылча · СОФ", accent: "cyan" },
+];
+const SEVER_STATUS_WHS = [...SEVER_WHS, ...SEVER_ZH_FORMS];
 const SPECIAL_TABS = {
+  zhashylcha: { label: "РЦ Жашылча", Icon: Moon, accent: "cyan" },
   karakol: { label: "Каракол", Icon: Mountain, accent: "fuchsia" },
   bazar_korgon: { label: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange" },
   osh: { label: "РЦ Ош", Icon: MapPin, accent: "emerald" },
@@ -540,7 +546,7 @@ function useRegionDay({ date, store, warehouses, label, saveTimers, showToast })
   };
   const unlock = (whId) => store.setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
 
-  return { day, loading, duplicates, consolidated, update, add, remove, submit, unlock };
+  return { day, loading, duplicates, consolidated, update, add, remove, submit, unlock, patchRows };
 }
 
 const BK_STORE = { empty: emptyBazarKorgonDay, subscribe: subscribeToBazarKorgonDay, saveRows: saveBazarKorgonRows, setSubmitted: setBazarKorgonSubmitted };
@@ -651,6 +657,76 @@ export default function ShipmentApp() {
   const [oshSub, setOshSub] = useState("prigorodnoe");
   const bkTransfers = useMemo(() => buildBazarKorgonTransfers(date, bk.consolidated), [date, bk.consolidated]);
   const oshTransfers = useMemo(() => buildOshTransfers(date, osh.consolidated), [date, osh.consolidated]);
+
+  // Север · РЦ Жашылча (Молоко и СОФ): строки из файла 1С + ручные правки, как у Жашылчи в Холод Юг
+  const severZhUpdate = (key, rowId, field, value) =>
+    sever.patchRows(key, (rows) =>
+      rows.map((r) => {
+        if (r.id !== rowId) return r;
+        const v = field === "weight" || field === "volume" ? sanitizeWeight(value) : value;
+        return { ...r, [field]: v };
+      })
+    );
+  const severZhAdd = (key) => sever.patchRows(key, (rows) => [...rows, makeEmptyYugRow()]);
+  const severZhRemove = (key, rowId) =>
+    sever.patchRows(key, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
+  const severZhFile = async (key, file) => {
+    if (!file) return;
+    let buf;
+    try {
+      buf = await file.arrayBuffer();
+    } catch {
+      return showToast("Не удалось прочитать файл");
+    }
+    const res = parseYugFile(buf, SEVER_STORES);
+    if (res.error) return showToast(res.error);
+    const merged = mergeYugLines(sever.day[`rows_${key}`] || [], res.lines);
+    sever.patchRows(key, () => merged.rows);
+    const noStore = res.lines.filter((l) => !l.store).length;
+    showToast(
+      `Загружено: новых ${merged.added}, обновлено ${merged.updated}` + (noStore ? `, магазин не найден: ${noStore} — выберите вручную` : "")
+    );
+  };
+  const severZhSubmit = async (key) => {
+    const rows = (sever.day[`rows_${key}`] || []).filter(yugHasData);
+    if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
+    const bad = rows.filter((r) => yugIssues(r).incomplete).length;
+    if (bad > 0) return showToast(bad === 1 ? "Одна строка заполнена не полностью — проверьте подсвеченные поля" : `${bad} строк заполнены не полностью — проверьте подсвеченные поля`);
+    const seen = new Set();
+    for (const r of rows) {
+      const k = r.order.trim().toLowerCase();
+      if (seen.has(k)) return showToast("Есть повторяющиеся номера заказов — исправьте перед отправкой");
+      seen.add(k);
+    }
+    try {
+      await setSeverSubmitted(date, key, true);
+      showToast(`Север · ${SEVER_ZH_FORMS.find((f) => f.id === key).name}: данные отправлены в транспортный отдел`);
+    } catch {
+      showToast("Не удалось отправить — проверьте связь и попробуйте снова");
+    }
+  };
+  const severZhUnlock = (key) => setSeverSubmitted(date, key, false).catch(() => showToast("Не удалось изменить статус"));
+
+  // выгрузка Севера: склады + Жашылча (заказы одного магазина объединены, паллеты по весу/объёму)
+  const severConsolidated = useMemo(() => {
+    const list = [...sever.consolidated];
+    SEVER_ZH_KEYS.forEach((key) => {
+      if (!sever.day[`submitted_${key}`]) return;
+      collapseYugRows(sever.day[`rows_${key}`] || []).forEach((g) => {
+        list.push({
+          id: `${key}_${g.key}`, whId: key, warehouse: SEVER_ZH_FORMS.find((f) => f.id === key).name,
+          shipPoint: YUG_ZH_SHIP_POINT, accent: "cyan",
+          order: g.order, store: g.store || "—",
+          pallets: g.pallets, rolls: null, euro: null, american: null, boxes: null,
+          weight: Math.round(g.weight * 100) / 100,
+          total: g.pallets,
+          unloadSec: PALLET_UNLOAD_SEC,
+          group: YUG_ZH_GROUP,
+        });
+      });
+    });
+    return list;
+  }, [sever.consolidated, sever.day]);
   const patchWarehouseRows = useCallback(
     (whId, updater) => {
       setDay((current) => {
@@ -915,8 +991,8 @@ export default function ShipmentApp() {
     showToast("Файл РЦ Ош сформирован и скачан");
   };
   const exportSever = () => {
-    if (sever.consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов Севера");
-    downloadSeverWorkbook(date, sever.consolidated);
+    if (severConsolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов Севера");
+    downloadSeverWorkbook(date, severConsolidated);
     showToast("Файл Север сформирован и скачан");
   };
 
@@ -984,7 +1060,9 @@ export default function ShipmentApp() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6">
-        {activeTab === "sever" ? (
+        {activeTab === "zhashylcha" ? (
+          <ZhashylchaPanel date={date} />
+        ) : activeTab === "sever" ? (
           <SeverPanel
             date={date}
             sDay={sever.day}
@@ -992,9 +1070,9 @@ export default function ShipmentApp() {
             sub={severSub}
             onSubChange={setSeverSub}
             whp={sever}
-            consolidated={sever.consolidated}
+            consolidated={severConsolidated}
             onExport={exportSever}
-            zhStatus={zhStatus}
+            zh={{ onUpdate: severZhUpdate, onAdd: severZhAdd, onRemove: severZhRemove, onSubmit: severZhSubmit, onUnlock: severZhUnlock, onFile: severZhFile }}
           />
         ) : activeTab === "bazar_korgon" ? (
           <KarakolPanel
@@ -1119,7 +1197,7 @@ export default function ShipmentApp() {
             extraRegions={[
               { key: "bk", title: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange", day: bk.day, warehouses: REGION_WHS },
               { key: "osh", title: "РЦ Ош", Icon: MapPin, accent: "emerald", day: osh.day, warehouses: REGION_WHS },
-              { key: "sever", title: "Север", Icon: Compass, accent: "indigo", day: sever.day, warehouses: SEVER_WHS },
+              { key: "sever", title: "Север", Icon: Compass, accent: "indigo", day: sever.day, warehouses: SEVER_STATUS_WHS },
             ]}
             yugDateLabel={fmtDateRu(yDate)}
           />
@@ -2523,20 +2601,19 @@ function YugDateBar({ date, onChange }) {
 // логикой. Список магазинов пока — каракольские.
 // ---------------------------------------------------------------------------
 
-function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, onExport, zhStatus }) {
+function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, onExport, zh }) {
   const dateLabel = fmtDateRu(date);
   const whId = SEVER_WAREHOUSE_IDS.includes(sub) ? sub : SEVER_WAREHOUSE_IDS[0];
   const pill = (active) =>
     `flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
       active ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
     }`;
-  const zhDone = Boolean(zhStatus && zhStatus.milk && zhStatus.sof);
 
   return (
     <div className="space-y-5">
       <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-indigo-800">
         <Compass size={14} />
-        Север: заказы на {dateLabel}. Отдельные данные, отдельная выгрузка (только лист Orders, точка отгрузки — склад заказа). РЦ Жашылча — со своей логикой и своей выгрузкой.
+        Север: заказы на {dateLabel}. Отдельные данные, отдельная выгрузка (только лист Orders, точка отгрузки — склад заказа). Жашылча (Молоко и СОФ) — заказы из файла 1С или вручную, точка отгрузки — РЦ Жашылча.
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -2551,18 +2628,23 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
             </button>
           );
         })}
-        <button onClick={() => onSubChange("zhashylcha")} className={pill(sub === "zhashylcha")}>
-          <span className={`h-1.5 w-1.5 rounded-full ${zhDone ? ACCENT.cyan.dot : "bg-stone-300"}`} />
-          {ZH_DISPLAY_NAME}
-        </button>
+        {SEVER_ZH_FORMS.map((f) => {
+          const submitted = sDay[`submitted_${f.id}`];
+          const active = sub === f.id;
+          return (
+            <button key={f.id} onClick={() => onSubChange(f.id)} className={pill(active)}>
+              <span className={`h-1.5 w-1.5 rounded-full ${submitted ? ACCENT.cyan.dot : "bg-stone-300"}`} />
+              {f.name}
+              {submitted && <Lock size={12} className={active ? "text-stone-300" : "text-stone-400"} />}
+            </button>
+          );
+        })}
         <button onClick={() => onSubChange("otl")} className={pill(sub === "otl")}>
           <Truck size={14} /> Для ОТЛ (Север)
         </button>
       </div>
 
-      {sub === "zhashylcha" ? (
-        <ZhashylchaPanel date={date} />
-      ) : loading ? (
+      {loading ? (
         <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
           <Loader2 size={16} className="animate-spin" /> Загрузка данных Севера за {dateLabel}…
         </div>
@@ -2572,10 +2654,24 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
           consolidated={consolidated}
           onExport={onExport}
           dateLabel={dateLabel}
-          warehouses={SEVER_WHS}
+          warehouses={SEVER_STATUS_WHS}
           showTransport={false}
           titlePrefix="Север"
-          zhStatus={zhStatus}
+        />
+      ) : SEVER_ZH_KEYS.includes(sub) ? (
+        <YugZhashylchaPanel
+          key={`sever_${sub}`}
+          rows={sDay[`rows_${sub}`] || []}
+          submitted={sDay[`submitted_${sub}`]}
+          dateLabel={dateLabel}
+          stores={SEVER_STORES}
+          heading={`Север · ${SEVER_ZH_FORMS.find((f) => f.id === sub).name}`}
+          onUpdate={(rowId, field, value) => zh.onUpdate(sub, rowId, field, value)}
+          onAdd={() => zh.onAdd(sub)}
+          onRemove={(rowId) => zh.onRemove(sub, rowId)}
+          onSubmit={() => zh.onSubmit(sub)}
+          onUnlock={() => zh.onUnlock(sub)}
+          onFile={(file) => zh.onFile(sub, file)}
         />
       ) : (
         <WarehousePanel
