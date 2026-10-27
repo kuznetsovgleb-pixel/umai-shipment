@@ -2,16 +2,19 @@ import React, { useState, useMemo, useCallback, useEffect, useRef } from "react"
 import {
   Plus, Trash2, Send, Download, Truck, CheckCircle2, Circle, AlertTriangle,
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
-  Snowflake, Upload, ChevronLeft, ChevronRight,
+  Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
   emptyKarakolDay, subscribeToKarakolDay, saveKarakolRows, setKarakolSubmitted,
   emptyHolodYugDay, subscribeToHolodYugDay, saveHolodYugRows, setHolodYugSubmitted, makeEmptyYugRow,
+  emptyBazarKorgonDay, subscribeToBazarKorgonDay, saveBazarKorgonRows, setBazarKorgonSubmitted,
+  emptyOshDay, subscribeToOshDay, saveOshRows, setOshSubmitted,
+  emptySeverDay, subscribeToSeverDay, saveSeverRows, setSeverSubmitted,
 } from "../lib/dayStore";
-import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook } from "../lib/exportExcel";
+import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook, buildBazarKorgonTransfers, buildOshTransfers, downloadBazarKorgonWorkbook, downloadOshWorkbook, downloadSeverWorkbook } from "../lib/exportExcel";
 import {
   YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort,
   collapseYugRows, parseYugFile, yugPallets,
@@ -118,7 +121,7 @@ const findDuplicateStores = (rows) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "karakol", "holod_yug", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "karakol", "bazar_korgon", "osh", "sever", "holod_yug", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -236,6 +239,16 @@ const consolidateRows = (warehouses, dayData) => {
 // склады Холода Юга с той же формой, что и на основных вкладках
 const YUG_WH_IDS = ["sagadalieva_zamorozka", "hlebzavod", "kkcp"];
 const YUG_WHS = YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
+const REGION_WHS = REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
+const SEVER_WHS = SEVER_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
+const SPECIAL_TABS = {
+  karakol: { label: "Каракол", Icon: Mountain, accent: "fuchsia" },
+  bazar_korgon: { label: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange" },
+  osh: { label: "РЦ Ош", Icon: MapPin, accent: "emerald" },
+  sever: { label: "Север", Icon: Compass, accent: "indigo" },
+  holod_yug: { label: "Холод Юг", Icon: Snowflake, accent: "sky" },
+  otl: { label: "Для ОТЛ", Icon: Truck, accent: null },
+};
 const YUG_TR_NAME = "Транзит Юг";
 const YUG_TR_SHIP_POINT = "РЦ Транзит Юг";
 const YUG_TR_CATEGORIES = ["Заморозка", "Охлажденка"];
@@ -470,6 +483,70 @@ function StoreSelect({ value, onChange, disabled, hasError, stores = STORES_NO_K
   );
 }
 
+// Региональная вкладка с обычными формами складов (Базар-Коргон, Ош, Север):
+// подписка на дату, правка строк (debounce), проверки и отправка, консолидация
+function useRegionDay({ date, store, warehouses, label, saveTimers, showToast }) {
+  const [day, setDay] = useState(store.empty());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    const unsub = store.subscribe(
+      date,
+      (data) => {
+        setDay(data);
+        setLoading(false);
+      },
+      () => setLoading(false)
+    );
+    return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [date]);
+
+  const duplicates = useMemo(() => findDuplicateOrders(warehouses, day), [warehouses, day]);
+  const consolidated = useMemo(() => consolidateRows(warehouses, day), [warehouses, day]);
+
+  const patchRows = useCallback(
+    (whId, updater) => {
+      setDay((current) => {
+        const nextRows = updater(current[`rows_${whId}`] || []);
+        const next = { ...current, [`rows_${whId}`]: nextRows };
+        const key = `${label}_rows_${whId}`;
+        if (saveTimers.current[key]) clearTimeout(saveTimers.current[key]);
+        saveTimers.current[key] = setTimeout(() => {
+          store.saveRows(date, whId, nextRows).catch(() => showToast("Не удалось сохранить — проверьте связь"));
+        }, 500);
+        return next;
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [date]
+  );
+  const update = (whId, rowId, field, value) =>
+    patchRows(whId, (rows) => rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)));
+  const add = (whId) => patchRows(whId, (rows) => [...rows, makeEmptyRow()]);
+  const remove = (whId, rowId) =>
+    patchRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
+  const submit = async (whId) => {
+    const wh = WAREHOUSES.find((w) => w.id === whId);
+    const err = submitCheck(wh, day[`rows_${whId}`] || [], duplicates);
+    if (err) return showToast(err);
+    try {
+      await store.setSubmitted(date, whId, true);
+      showToast(`${label} · ${wh.name}: данные отправлены в транспортный отдел`);
+    } catch {
+      showToast("Не удалось отправить — проверьте связь и попробуйте снова");
+    }
+  };
+  const unlock = (whId) => store.setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
+
+  return { day, loading, duplicates, consolidated, update, add, remove, submit, unlock };
+}
+
+const BK_STORE = { empty: emptyBazarKorgonDay, subscribe: subscribeToBazarKorgonDay, saveRows: saveBazarKorgonRows, setSubmitted: setBazarKorgonSubmitted };
+const OSH_STORE = { empty: emptyOshDay, subscribe: subscribeToOshDay, saveRows: saveOshRows, setSubmitted: setOshSubmitted };
+const SEVER_STORE = { empty: emptySeverDay, subscribe: subscribeToSeverDay, saveRows: saveSeverRows, setSubmitted: setSeverSubmitted };
+
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
   const [day, setDay] = useState(emptyDay());
@@ -565,6 +642,15 @@ export default function ShipmentApp() {
   // иначе быстрое редактирование одного места отменяет ещё не сработавшее
   // сохранение другого места, и данные тихо теряются
   const saveTimers = useRef({});
+  // РЦ Базар-Коргон, РЦ Ош, Север — свои коллекции, следуют календарю сверху
+  const bk = useRegionDay({ date, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", saveTimers, showToast });
+  const osh = useRegionDay({ date, store: OSH_STORE, warehouses: REGION_WHS, label: "Ош", saveTimers, showToast });
+  const sever = useRegionDay({ date, store: SEVER_STORE, warehouses: SEVER_WHS, label: "Север", saveTimers, showToast });
+  const [severSub, setSeverSub] = useState("sagadalieva_zamorozka");
+  const [bkSub, setBkSub] = useState("prigorodnoe");
+  const [oshSub, setOshSub] = useState("prigorodnoe");
+  const bkTransfers = useMemo(() => buildBazarKorgonTransfers(date, bk.consolidated), [date, bk.consolidated]);
+  const oshTransfers = useMemo(() => buildOshTransfers(date, osh.consolidated), [date, osh.consolidated]);
   const patchWarehouseRows = useCallback(
     (whId, updater) => {
       setDay((current) => {
@@ -818,6 +904,22 @@ export default function ShipmentApp() {
     showToast("Файл Каракола сформирован и скачан");
   };
 
+  const exportBk = () => {
+    if (bk.consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
+    downloadBazarKorgonWorkbook(date, bk.consolidated);
+    showToast("Файл РЦ Базар-Коргон сформирован и скачан");
+  };
+  const exportOsh = () => {
+    if (osh.consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
+    downloadOshWorkbook(date, osh.consolidated);
+    showToast("Файл РЦ Ош сформирован и скачан");
+  };
+  const exportSever = () => {
+    if (sever.consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов Севера");
+    downloadSeverWorkbook(date, sever.consolidated);
+    showToast("Файл Север сформирован и скачан");
+  };
+
   const exportYug = () => {
     if (yugConsolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов Холод Юг");
     downloadHolodYugWorkbook(yDate, yugConsolidated);
@@ -857,14 +959,12 @@ export default function ShipmentApp() {
       <div className="border-b border-stone-200 bg-white">
         <div className="max-w-6xl mx-auto px-6 flex items-end gap-1 flex-wrap">
           {TABS.map((id) => {
+            const sp = SPECIAL_TABS[id];
             const isOtl = id === "otl";
-            const isZh = id === "zhashylcha";
-            const isK = id === "karakol";
-            const isY = id === "holod_yug";
-            const w = !isOtl && !isZh && !isK && !isY ? WAREHOUSES.find((x) => x.id === id) : null;
-            const a = w ? ACCENT[w.accent] : isZh ? ACCENT.cyan : isK ? ACCENT.fuchsia : isY ? ACCENT.sky : null;
+            const w = sp ? null : WAREHOUSES.find((x) => x.id === id);
+            const a = sp ? (sp.accent ? ACCENT[sp.accent] : null) : ACCENT[w.accent];
             const active = activeTab === id;
-            const sub = !isOtl && !isZh && !isK && !isY && day[`submitted_${id}`];
+            const sub = !sp && day[`submitted_${id}`];
             return (
               <button
                 key={id}
@@ -873,8 +973,8 @@ export default function ShipmentApp() {
                   active ? "bg-stone-50 text-stone-900" : "text-stone-500 hover:text-stone-700"
                 }`}
               >
-                {isOtl ? <Truck size={14} /> : isZh ? <Moon size={14} /> : isK ? <Mountain size={14} /> : isY ? <Snowflake size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
-                {isZh ? ZH_DISPLAY_NAME : isK ? "Каракол" : isY ? "Холод Юг" : tabLabel(id)}
+                {sp ? <sp.Icon size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
+                {sp ? sp.label : tabLabel(id)}
                 {sub && <Lock size={12} className="text-stone-400" />}
                 {active && <span className={`absolute left-0 right-0 -bottom-px h-0.5 ${isOtl ? "bg-stone-800" : a.bg}`} />}
               </button>
@@ -884,8 +984,66 @@ export default function ShipmentApp() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6">
-        {activeTab === "zhashylcha" ? (
-          <ZhashylchaPanel date={date} />
+        {activeTab === "sever" ? (
+          <SeverPanel
+            date={date}
+            sDay={sever.day}
+            loading={sever.loading}
+            sub={severSub}
+            onSubChange={setSeverSub}
+            whp={sever}
+            consolidated={sever.consolidated}
+            onExport={exportSever}
+            zhStatus={zhStatus}
+          />
+        ) : activeTab === "bazar_korgon" ? (
+          <KarakolPanel
+            kDay={bk.day}
+            loading={bk.loading}
+            sub={bkSub}
+            onSubChange={setBkSub}
+            duplicateOrders={bk.duplicates}
+            onUpdate={bk.update}
+            onAdd={bk.add}
+            onRemove={bk.remove}
+            onSubmit={bk.submit}
+            onUnlock={bk.unlock}
+            consolidated={bk.consolidated}
+            transfers={bkTransfers}
+            onExport={exportBk}
+            dateLabel={fmtDateRu(date)}
+            name="РЦ Базар-Коргон"
+            point={BAZAR_KORGON_POINT}
+            warehouses={REGION_WHS}
+            stores={BAZAR_KORGON_STORES}
+            transferPrefix="004"
+            Icon={MapPin}
+            tone="orange"
+          />
+        ) : activeTab === "osh" ? (
+          <KarakolPanel
+            kDay={osh.day}
+            loading={osh.loading}
+            sub={oshSub}
+            onSubChange={setOshSub}
+            duplicateOrders={osh.duplicates}
+            onUpdate={osh.update}
+            onAdd={osh.add}
+            onRemove={osh.remove}
+            onSubmit={osh.submit}
+            onUnlock={osh.unlock}
+            consolidated={osh.consolidated}
+            transfers={oshTransfers}
+            onExport={exportOsh}
+            dateLabel={fmtDateRu(date)}
+            name="РЦ Ош"
+            point={OSH_POINT}
+            warehouses={REGION_WHS}
+            stores={OSH_STORES}
+            transferPrefix="005"
+            Icon={MapPin}
+            tone="emerald"
+          />
         ) : activeTab === "holod_yug" ? (
           <HolodYugPanel
             date={yDate}
@@ -958,6 +1116,11 @@ export default function ShipmentApp() {
             zhStatus={zhStatus}
             karakolDay={kDay}
             yugDay={yDay}
+            extraRegions={[
+              { key: "bk", title: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange", day: bk.day, warehouses: REGION_WHS },
+              { key: "osh", title: "РЦ Ош", Icon: MapPin, accent: "emerald", day: osh.day, warehouses: REGION_WHS },
+              { key: "sever", title: "Север", Icon: Compass, accent: "indigo", day: sever.day, warehouses: SEVER_WHS },
+            ]}
             yugDateLabel={fmtDateRu(yDate)}
           />
         )}
@@ -1246,6 +1409,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
 function OtlPanel({
   day, consolidated, onAddVehicle, onUpdateVehicle, onRemoveVehicle, onExport, dateLabel, zhStatus,
   karakolDay = null, yugDay = null, yugDateLabel = "", warehouses = WAREHOUSES, showTransport = true, transfers = null, titlePrefix = "",
+  transferPoint = KARAKOL_POINT, transferPrefix = "003", extraRegions = [],
 }) {
   const totalPallets = consolidated.reduce((s, r) => s + r.total, 0);
   const totalWeight = consolidated.reduce((s, r) => s + r.weight, 0);
@@ -1295,6 +1459,26 @@ function OtlPanel({
             })}
           </div>
         )}
+        {extraRegions.map((rg) => {
+          const ac = ACCENT[rg.accent];
+          return (
+            <div key={rg.key} className="w-full flex items-center gap-6 flex-wrap border-t border-stone-100 pt-3">
+              <span className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${ac.text}`}>
+                <rg.Icon size={13} /> {rg.title}
+              </span>
+              {rg.warehouses.map((w) => {
+                const sub = rg.day[`submitted_${w.id}`];
+                return (
+                  <div key={w.id} className="flex items-center gap-1.5 text-sm font-medium">
+                    {sub ? <CheckCircle2 size={15} className={ac.text} /> : <Circle size={15} className="text-stone-300" />}
+                    <span className={sub ? "text-stone-900" : "text-stone-400"}>{w.name}</span>
+                    <span className={`text-xs ${sub ? ac.text : "text-stone-400"}`}>{sub ? "отправлено" : "ожидание"}</span>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
         {yugDay && (
           <div className="w-full flex items-center gap-6 flex-wrap border-t border-stone-100 pt-3">
             <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-sky-700">
@@ -1394,11 +1578,11 @@ function OtlPanel({
       {transfers && (
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-1">
-            Перемещения РЦ → {KARAKOL_POINT} · {transfers.length} шт.
+            Перемещения РЦ → {transferPoint} · {transfers.length} шт.
           </h2>
           <p className="text-xs text-stone-400 mb-3">
-            Добавляются в выгрузку автоматически — по одному на склад с отправленными заказами. Номер: 003 + ддммгггг + номер склада
-            (Пригородное 1, Ак-Орго 2, ПТО 3, Садыгалиева-сыпучка 4, Транзит Север 5). Кол-во ГМ — сумма «Итого» склада, вес — сумма весов.
+            Добавляются в выгрузку автоматически — по одному на склад с отправленными заказами. Номер: {transferPrefix} + ддммгггг + номер склада
+            ({warehouses.map((w, i) => `${w.name} ${i + 1}`).join(", ")}). Кол-во ГМ — сумма «Итого» склада, вес — сумма весов.
           </p>
           <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full text-sm">
@@ -1575,18 +1759,25 @@ function KarakolPanel({
   kDay, loading, sub, onSubChange, duplicateOrders,
   onUpdate, onAdd, onRemove, onSubmit, onUnlock,
   consolidated, transfers, onExport, dateLabel,
+  name = "Каракол", point = KARAKOL_POINT, warehouses = KARAKOL_WAREHOUSES, stores = KARAKOL_STORES,
+  transferPrefix = "003", Icon = Mountain, tone = "fuchsia",
 }) {
-  const wh = KARAKOL_WAREHOUSES.find((w) => w.id === sub);
+  const wh = warehouses.find((w) => w.id === sub);
+  const BANNER = {
+    fuchsia: "bg-fuchsia-50 border-fuchsia-200 text-fuchsia-800",
+    orange: "bg-orange-50 border-orange-200 text-orange-800",
+    emerald: "bg-emerald-50 border-emerald-200 text-emerald-800",
+  }[tone];
 
   return (
     <div className="space-y-5">
-      <div className="bg-fuchsia-50 border border-fuchsia-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-fuchsia-800">
-        <Mountain size={14} />
-        Каракол: заказы магазинов Каракола на {dateLabel}. Отдельные данные, отдельная выгрузка (только лист Orders, точка отгрузки — {KARAKOL_POINT}).
+      <div className={`border rounded-xl px-4 py-3 flex items-center gap-2 text-xs ${BANNER}`}>
+        <Icon size={14} />
+        {name}: заказы магазинов региона на {dateLabel}. Отдельные данные, отдельная выгрузка (только лист Orders, точка отгрузки — {point}).
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
-        {KARAKOL_WAREHOUSES.map((w) => {
+        {warehouses.map((w) => {
           const a = ACCENT[w.accent];
           const active = sub === w.id;
           const submitted = kDay[`submitted_${w.id}`];
@@ -1610,13 +1801,13 @@ function KarakolPanel({
             sub === "otl" ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
           }`}
         >
-          <Truck size={14} /> Для ОТЛ (Каракол)
+          <Truck size={14} /> Для ОТЛ ({name})
         </button>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
-          <Loader2 size={16} className="animate-spin" /> Загрузка данных Каракола за {dateLabel}…
+          <Loader2 size={16} className="animate-spin" /> Загрузка данных ({name}) за {dateLabel}…
         </div>
       ) : sub === "otl" ? (
         <OtlPanel
@@ -1624,17 +1815,19 @@ function KarakolPanel({
           consolidated={consolidated}
           onExport={onExport}
           dateLabel={dateLabel}
-          warehouses={KARAKOL_WAREHOUSES}
+          warehouses={warehouses}
           showTransport={false}
           transfers={transfers}
-          titlePrefix="Каракол"
+          titlePrefix={name}
+          transferPoint={point}
+          transferPrefix={transferPrefix}
         />
       ) : (
         <WarehousePanel
-          key={sub}
+          key={`${name}_${sub}`}
           wh={wh}
-          prefix="Каракол"
-          stores={KARAKOL_STORES}
+          prefix={name}
+          stores={stores}
           rows={kDay[`rows_${sub}`] || []}
           submitted={kDay[`submitted_${sub}`]}
           duplicateOrders={duplicateOrders}
@@ -2320,6 +2513,88 @@ function YugDateBar({ date, onChange }) {
       <span className="text-xs text-stone-400">
         Отгрузка по пн, ср, пт и сб. Заявки вводят накануне и копят до дня отгрузки; новый пустой список открывается со следующей датой отгрузки.
       </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Север: Садыгалиева (заморозка), ККЦП, Хлебзавод — обычные формы, своя коллекция,
+// любая дата (по календарю сверху); РЦ Жашылча (Молоко/СОФ) — отдельный блок со своей
+// логикой. Список магазинов пока — каракольские.
+// ---------------------------------------------------------------------------
+
+function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, onExport, zhStatus }) {
+  const dateLabel = fmtDateRu(date);
+  const whId = SEVER_WAREHOUSE_IDS.includes(sub) ? sub : SEVER_WAREHOUSE_IDS[0];
+  const pill = (active) =>
+    `flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
+      active ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
+    }`;
+  const zhDone = Boolean(zhStatus && zhStatus.milk && zhStatus.sof);
+
+  return (
+    <div className="space-y-5">
+      <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-indigo-800">
+        <Compass size={14} />
+        Север: заказы на {dateLabel}. Отдельные данные, отдельная выгрузка (только лист Orders, точка отгрузки — склад заказа). РЦ Жашылча — со своей логикой и своей выгрузкой.
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        {SEVER_WHS.map((w) => {
+          const submitted = sDay[`submitted_${w.id}`];
+          const active = sub === w.id;
+          return (
+            <button key={w.id} onClick={() => onSubChange(w.id)} className={pill(active)}>
+              <span className={`h-1.5 w-1.5 rounded-full ${submitted ? ACCENT[w.accent].dot : "bg-stone-300"}`} />
+              {w.name}
+              {submitted && <Lock size={12} className={active ? "text-stone-300" : "text-stone-400"} />}
+            </button>
+          );
+        })}
+        <button onClick={() => onSubChange("zhashylcha")} className={pill(sub === "zhashylcha")}>
+          <span className={`h-1.5 w-1.5 rounded-full ${zhDone ? ACCENT.cyan.dot : "bg-stone-300"}`} />
+          {ZH_DISPLAY_NAME}
+        </button>
+        <button onClick={() => onSubChange("otl")} className={pill(sub === "otl")}>
+          <Truck size={14} /> Для ОТЛ (Север)
+        </button>
+      </div>
+
+      {sub === "zhashylcha" ? (
+        <ZhashylchaPanel date={date} />
+      ) : loading ? (
+        <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
+          <Loader2 size={16} className="animate-spin" /> Загрузка данных Севера за {dateLabel}…
+        </div>
+      ) : sub === "otl" ? (
+        <OtlPanel
+          day={sDay}
+          consolidated={consolidated}
+          onExport={onExport}
+          dateLabel={dateLabel}
+          warehouses={SEVER_WHS}
+          showTransport={false}
+          titlePrefix="Север"
+          zhStatus={zhStatus}
+        />
+      ) : (
+        <WarehousePanel
+          key={`sever_${whId}`}
+          wh={SEVER_WHS.find((w) => w.id === whId)}
+          prefix="Север"
+          rows={sDay[`rows_${whId}`] || []}
+          submitted={sDay[`submitted_${whId}`]}
+          duplicateOrders={whp.duplicates}
+          onUpdate={(rowId, field, value) => whp.update(whId, rowId, field, value)}
+          onPasteQty={(rowId, field, raw) => whp.update(whId, rowId, field, sanitizeQty(raw))}
+          onAdd={() => whp.add(whId)}
+          onRemove={(rowId) => whp.remove(whId, rowId)}
+          onSubmit={() => whp.submit(whId)}
+          onUnlock={() => whp.unlock(whId)}
+          dateLabel={dateLabel}
+          stores={SEVER_STORES}
+        />
+      )}
     </div>
   );
 }
