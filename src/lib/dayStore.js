@@ -290,12 +290,15 @@ export async function setKarakolSubmitted(date, whId, value) {
 // у каждого склада свои rows_<id> и submitted_<id>.
 // ---------------------------------------------------------------------------
 
-const makeRegionStore = (collectionName, whIds) => {
+// yugKeys — дополнительные блоки со строками формата 1С (номер, магазин, вес, объём)
+const makeRegionStore = (collectionName, whIds, yugKeys = []) => {
+  const allKeys = [...whIds, ...yugKeys];
+  const emptyFor = (id) => [yugKeys.includes(id) ? makeEmptyYugRow() : makeEmptyRow()];
   const refFor = (date) => doc(db, collectionName, date);
   const empty = () => {
     const day = {};
-    whIds.forEach((id) => {
-      day[`rows_${id}`] = [makeEmptyRow()];
+    allKeys.forEach((id) => {
+      day[`rows_${id}`] = emptyFor(id);
       day[`submitted_${id}`] = false;
     });
     return day;
@@ -307,8 +310,8 @@ const makeRegionStore = (collectionName, whIds) => {
         if (snap.exists()) {
           const data = snap.data();
           const patch = {};
-          whIds.forEach((id) => {
-            if (!Array.isArray(data[`rows_${id}`])) patch[`rows_${id}`] = [makeEmptyRow()];
+          allKeys.forEach((id) => {
+            if (!Array.isArray(data[`rows_${id}`])) patch[`rows_${id}`] = emptyFor(id);
             if (typeof data[`submitted_${id}`] !== "boolean") patch[`submitted_${id}`] = false;
           });
           if (Object.keys(patch).length > 0) {
@@ -360,7 +363,9 @@ export const subscribeToOshDay = oshStore.subscribe;
 export const saveOshRows = oshStore.saveRows;
 export const setOshSubmitted = oshStore.setSubmitted;
 
-const severStore = makeRegionStore("shipments_sever", SEVER_WAREHOUSE_IDS);
+// Север: 3 склада с обычной формой + РЦ Жашылча (Молоко и СОФ) со строками из файла 1С
+export const SEVER_ZH_KEYS = ["zh_milk", "zh_sof"];
+const severStore = makeRegionStore("shipments_sever", SEVER_WAREHOUSE_IDS, SEVER_ZH_KEYS);
 export const emptySeverDay = severStore.empty;
 export const subscribeToSeverDay = severStore.subscribe;
 export const saveSeverRows = severStore.saveRows;
