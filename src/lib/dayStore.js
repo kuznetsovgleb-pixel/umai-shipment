@@ -1,6 +1,6 @@
 import { doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE, KARAKOL_WAREHOUSE_IDS } from "../data/reference";
+import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, SEVER_WAREHOUSE_IDS } from "../data/reference";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -283,6 +283,88 @@ export async function setKarakolSubmitted(date, whId, value) {
     throw err;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Региональные вкладки с обычными формами складов (как Каракол): РЦ Базар-Коргон,
+// РЦ Ош, Север. Для каждой — своя коллекция shipments_<...>/{YYYY-MM-DD},
+// у каждого склада свои rows_<id> и submitted_<id>.
+// ---------------------------------------------------------------------------
+
+const makeRegionStore = (collectionName, whIds) => {
+  const refFor = (date) => doc(db, collectionName, date);
+  const empty = () => {
+    const day = {};
+    whIds.forEach((id) => {
+      day[`rows_${id}`] = [makeEmptyRow()];
+      day[`submitted_${id}`] = false;
+    });
+    return day;
+  };
+  const subscribe = (date, onChange, onError) =>
+    onSnapshot(
+      refFor(date),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          const patch = {};
+          whIds.forEach((id) => {
+            if (!Array.isArray(data[`rows_${id}`])) patch[`rows_${id}`] = [makeEmptyRow()];
+            if (typeof data[`submitted_${id}`] !== "boolean") patch[`submitted_${id}`] = false;
+          });
+          if (Object.keys(patch).length > 0) {
+            setDoc(refFor(date), patch, { merge: true }).catch((err) =>
+              console.error(`[dayStore] ${collectionName} backfill failed for`, date, err)
+            );
+            onChange({ ...data, ...patch });
+          } else {
+            onChange(data);
+          }
+        } else {
+          const seed = empty();
+          setDoc(refFor(date), seed, { merge: true }).catch((err) =>
+            console.error(`[dayStore] ${collectionName} seed creation failed for`, date, err)
+          );
+          onChange(seed);
+        }
+      },
+      (err) => onError && onError(err)
+    );
+  const saveRows = async (date, whId, rows) => {
+    try {
+      await setDoc(refFor(date), { [`rows_${whId}`]: rows }, { merge: true });
+    } catch (err) {
+      console.error(`[dayStore] ${collectionName} saveRows failed`, { date, whId }, err);
+      throw err;
+    }
+  };
+  const setSubmittedFlag = async (date, whId, value) => {
+    try {
+      await setDoc(refFor(date), { [`submitted_${whId}`]: value }, { merge: true });
+    } catch (err) {
+      console.error(`[dayStore] ${collectionName} setSubmitted failed`, { date, whId, value }, err);
+      throw err;
+    }
+  };
+  return { empty, subscribe, saveRows, setSubmitted: setSubmittedFlag };
+};
+
+const bazarKorgonStore = makeRegionStore("shipments_bazar_korgon", REGION_WAREHOUSE_IDS);
+export const emptyBazarKorgonDay = bazarKorgonStore.empty;
+export const subscribeToBazarKorgonDay = bazarKorgonStore.subscribe;
+export const saveBazarKorgonRows = bazarKorgonStore.saveRows;
+export const setBazarKorgonSubmitted = bazarKorgonStore.setSubmitted;
+
+const oshStore = makeRegionStore("shipments_osh", REGION_WAREHOUSE_IDS);
+export const emptyOshDay = oshStore.empty;
+export const subscribeToOshDay = oshStore.subscribe;
+export const saveOshRows = oshStore.saveRows;
+export const setOshSubmitted = oshStore.setSubmitted;
+
+const severStore = makeRegionStore("shipments_sever", SEVER_WAREHOUSE_IDS);
+export const emptySeverDay = severStore.empty;
+export const subscribeToSeverDay = severStore.subscribe;
+export const saveSeverRows = severStore.saveRows;
+export const setSeverSubmitted = severStore.setSubmitted;
 
 // ---------------------------------------------------------------------------
 // Холод Юг — коллекция shipments_holod_yug/{YYYY-MM-DD}, где дата — ДАТА ОТГРУЗКИ
