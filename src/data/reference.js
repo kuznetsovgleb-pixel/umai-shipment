@@ -634,7 +634,7 @@ export const OSH_STORES = HOLOD_YUG_STORES.filter((s) => s !== OSH_POINT);
 // Список магазинов — фиксированный (Нарын, Балыкчы, Каракол и др.).
 // ---------------------------------------------------------------------------
 export const SEVER_WAREHOUSE_IDS = ["sagadalieva_zamorozka", "kkcp", "hlebzavod"];
-export const SEVER_STORES = [
+const SEVER_STORES_RAW = [
   "Глобус62",
   "Глобус72",
   "Глобус80",
@@ -694,7 +694,14 @@ export const SEVER_STORES = [
   "Глобус93 Таш-Мойнок",
   "Глобус52 Байтик",
   "Достор 45 Байтик",
+  "Достор36 Нижняя Ала-Арча",
 ];
+
+// сортировка списка выбора: по алфавиту и по номерам (Глобус2 < Глобус10 < Глобус100)
+const storeSortKey = (name) => name.replace(/^(\D+?)\s*(\d+)/, "$1$2");
+export const SEVER_STORES = [...SEVER_STORES_RAW].sort((x, y) =>
+  storeSortKey(x).localeCompare(storeSortKey(y), "ru", { numeric: true, sensitivity: "base" })
+);
 // Основные вкладки ККЦП и Хлебзавод: без южных (они в Холод Юг), каракольских и магазинов Севера (они в Севере)
 export const STORES_NO_SEVER = STORES_NO_YUG.filter((s) => !SEVER_STORES.includes(s));
 
