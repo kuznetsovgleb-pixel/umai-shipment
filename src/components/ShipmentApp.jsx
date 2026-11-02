@@ -680,7 +680,7 @@ export default function ShipmentApp() {
     }
     const res = parseYugFile(buf, SEVER_STORES);
     if (res.error) return showToast(res.error);
-    const merged = mergeYugLines(sever.day[`rows_${key}`] || [], res.lines);
+    const merged = mergeYugLines(sever.day[`rows_${key}`] || [], res.lines, key === "zh_sof");
     sever.patchRows(key, () => merged.rows);
     const noStore = res.lines.filter((l) => !l.store).length;
     showToast(
@@ -690,7 +690,7 @@ export default function ShipmentApp() {
   const severZhSubmit = async (key) => {
     const rows = (sever.day[`rows_${key}`] || []).filter(yugHasData);
     if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
-    const bad = rows.filter((r) => yugIssues(r).incomplete).length;
+    const bad = rows.filter((r) => yugIssues(r, false, key === "zh_sof").incomplete).length;
     if (bad > 0) return showToast(bad === 1 ? "Одна строка заполнена не полностью — проверьте подсвеченные поля" : `${bad} строк заполнены не полностью — проверьте подсвеченные поля`);
     const seen = new Set();
     for (const r of rows) {
@@ -712,7 +712,7 @@ export default function ShipmentApp() {
     const list = [...sever.consolidated];
     SEVER_ZH_KEYS.forEach((key) => {
       if (!sever.day[`submitted_${key}`]) return;
-      collapseYugRows(sever.day[`rows_${key}`] || []).forEach((g) => {
+      collapseYugRows(sever.day[`rows_${key}`] || [], key === "zh_sof").forEach((g) => {
         list.push({
           id: `${key}_${g.key}`, whId: key, warehouse: SEVER_ZH_FORMS.find((f) => f.id === key).name,
           shipPoint: YUG_ZH_SHIP_POINT, accent: "cyan",
@@ -2646,6 +2646,7 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
           submitted={sDay[`submitted_${sub}`]}
           dateLabel={dateLabel}
           stores={SEVER_STORES}
+          weightOnly={sub === "zh_sof"}
           heading={`Регионы · ${SEVER_ZH_FORMS.find((f) => f.id === sub).name}`}
           onUpdate={(rowId, field, value) => zh.onUpdate(sub, rowId, field, value)}
           onAdd={() => zh.onAdd(sub)}
