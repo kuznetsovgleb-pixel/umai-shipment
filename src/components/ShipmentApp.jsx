@@ -538,6 +538,9 @@ function useRegionDay({ date, store, warehouses, label, saveTimers, showToast })
     const err = submitCheck(wh, day[`rows_${whId}`] || [], duplicates);
     if (err) return showToast(err);
     try {
+      // сначала гарантированно сохраняем строки, потом ставим «отправлено» —
+      // иначе при сбое записи можно отправить пустой список
+      await store.saveRows(date, whId, day[`rows_${whId}`] || []);
       await store.setSubmitted(date, whId, true);
       showToast(`${label} · ${wh.name}: данные отправлены в транспортный отдел`);
     } catch {
@@ -699,6 +702,7 @@ export default function ShipmentApp() {
       seen.add(k);
     }
     try {
+      await saveSeverRows(date, key, sever.day[`rows_${key}`] || []);
       await setSeverSubmitted(date, key, true);
       showToast(`Регионы · ${SEVER_ZH_FORMS.find((f) => f.id === key).name}: данные отправлены в транспортный отдел`);
     } catch {
