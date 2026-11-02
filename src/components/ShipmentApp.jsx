@@ -4,7 +4,7 @@ import {
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
   Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
@@ -251,7 +251,7 @@ const SPECIAL_TABS = {
   karakol: { label: "Каракол", Icon: Mountain, accent: "fuchsia" },
   bazar_korgon: { label: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange" },
   osh: { label: "РЦ Ош", Icon: MapPin, accent: "emerald" },
-  sever: { label: "Север", Icon: Compass, accent: "indigo" },
+  sever: { label: "Регионы", Icon: Compass, accent: "indigo" },
   holod_yug: { label: "Холод Юг", Icon: Snowflake, accent: "sky" },
   otl: { label: "Для ОТЛ", Icon: Truck, accent: null },
 };
@@ -268,19 +268,19 @@ const YUG_STATUS_WHS = [
 
 const yugHasData = (r) => Boolean(String(r.order || "").trim() || r.store || r.weight || r.volume);
 // needsCategory — для Транзит Юга: у каждого заказа выбирается товарная группа
-const yugIssues = (r, needsCategory = false) => {
+const yugIssues = (r, needsCategory = false, weightOnly = false) => {
   const hasData = yugHasData(r) || Boolean(r.category);
   if (!hasData) return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, missingCategory: false, incomplete: false };
   const missingOrder = !String(r.order || "").trim();
   const missingStore = !r.store;
-  const missingQty = !(parseFloat(r.weight) > 0) && !(parseFloat(r.volume) > 0);
+  const missingQty = weightOnly ? !(parseFloat(r.weight) > 0) : !(parseFloat(r.weight) > 0) && !(parseFloat(r.volume) > 0);
   const missingCategory = needsCategory && !r.category;
   return { hasData: true, missingOrder, missingStore, missingQty, missingCategory, incomplete: missingOrder || missingStore || missingQty || missingCategory };
 };
 
 // повторная загрузка файла: заказы с тем же номером обновляются, новые добавляются,
 // остальные строки не трогаем
-const mergeYugLines = (rows, lines) => {
+const mergeYugLines = (rows, lines, weightOnly = false) => {
   const next = rows.filter(yugHasData).map((r) => ({ ...r }));
   const byOrder = new Map();
   next.forEach((r, i) => {
@@ -290,7 +290,7 @@ const mergeYugLines = (rows, lines) => {
   let added = 0, updated = 0;
   lines.forEach((l) => {
     const k = l.order.trim().toLowerCase();
-    const patch = { rawStore: l.rawName, weight: String(l.weight), volume: String(l.volume) };
+    const patch = { rawStore: l.rawName, weight: String(l.weight), volume: weightOnly ? "" : String(l.volume) };
     if (byOrder.has(k)) {
       const i = byOrder.get(k);
       next[i] = { ...next[i], ...patch, store: l.store || next[i].store };
@@ -651,7 +651,7 @@ export default function ShipmentApp() {
   // РЦ Базар-Коргон, РЦ Ош, Север — свои коллекции, следуют календарю сверху
   const bk = useRegionDay({ date, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", saveTimers, showToast });
   const osh = useRegionDay({ date, store: OSH_STORE, warehouses: REGION_WHS, label: "Ош", saveTimers, showToast });
-  const sever = useRegionDay({ date, store: SEVER_STORE, warehouses: SEVER_WHS, label: "Север", saveTimers, showToast });
+  const sever = useRegionDay({ date, store: SEVER_STORE, warehouses: SEVER_WHS, label: "Регионы", saveTimers, showToast });
   const [severSub, setSeverSub] = useState("sagadalieva_zamorozka");
   const [bkSub, setBkSub] = useState("prigorodnoe");
   const [oshSub, setOshSub] = useState("prigorodnoe");
@@ -700,7 +700,7 @@ export default function ShipmentApp() {
     }
     try {
       await setSeverSubmitted(date, key, true);
-      showToast(`Север · ${SEVER_ZH_FORMS.find((f) => f.id === key).name}: данные отправлены в транспортный отдел`);
+      showToast(`Регионы · ${SEVER_ZH_FORMS.find((f) => f.id === key).name}: данные отправлены в транспортный отдел`);
     } catch {
       showToast("Не удалось отправить — проверьте связь и попробуйте снова");
     }
@@ -991,9 +991,9 @@ export default function ShipmentApp() {
     showToast("Файл РЦ Ош сформирован и скачан");
   };
   const exportSever = () => {
-    if (severConsolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов Севера");
+    if (severConsolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов вкладки «Регионы»");
     downloadSeverWorkbook(date, severConsolidated);
-    showToast("Файл Север сформирован и скачан");
+    showToast("Файл «Регионы» сформирован и скачан");
   };
 
   const exportYug = () => {
@@ -1180,7 +1180,7 @@ export default function ShipmentApp() {
             onSubmit={() => submitWarehouse(activeTab)}
             onUnlock={() => unlockWarehouse(activeTab)}
             dateLabel={fmtDateRu(date)}
-            stores={YUG_WAREHOUSE_IDS.includes(activeTab) ? STORES_NO_YUG : STORES_NO_KARAKOL}
+            stores={activeTab === "kkcp" || activeTab === "hlebzavod" ? STORES_NO_SEVER : YUG_WAREHOUSE_IDS.includes(activeTab) ? STORES_NO_YUG : STORES_NO_KARAKOL}
           />
         ) : (
           <OtlPanel
@@ -1197,7 +1197,7 @@ export default function ShipmentApp() {
             extraRegions={[
               { key: "bk", title: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange", day: bk.day, warehouses: REGION_WHS },
               { key: "osh", title: "РЦ Ош", Icon: MapPin, accent: "emerald", day: osh.day, warehouses: REGION_WHS },
-              { key: "sever", title: "Север", Icon: Compass, accent: "indigo", day: sever.day, warehouses: SEVER_STATUS_WHS },
+              { key: "sever", title: "Регионы", Icon: Compass, accent: "indigo", day: sever.day, warehouses: SEVER_STATUS_WHS },
             ]}
             yugDateLabel={fmtDateRu(yDate)}
           />
@@ -2212,7 +2212,7 @@ function ZhashylchaPanel({ date }) {
     }
     const res = parseYugFile(buf, STORES_ZHASHYLCHA);
     if (res.error) return showToast(res.error);
-    const merged = mergeYugLines(rowsMilk, res.lines);
+    const merged = mergeYugLines(rowsMilk, res.lines, true);
     patchRows("milk", () => merged.rows);
     const noStore = res.lines.filter((l) => !l.store).length;
     showToast(
@@ -2226,7 +2226,7 @@ function ZhashylchaPanel({ date }) {
   const submitMilk = async () => {
     const rows = rowsMilk.filter(yugHasData);
     if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
-    const bad = rows.filter((r) => yugIssues(r).incomplete).length;
+    const bad = rows.filter((r) => yugIssues(r, false, true).incomplete).length;
     if (bad > 0) return showToast(bad === 1 ? "Одна строка заполнена не полностью — проверьте подсвеченные поля" : `${bad} строк заполнены не полностью — проверьте подсвеченные поля`);
     if (rows.some((r) => duplicateOrders.has(r.order.trim().toLowerCase()))) return showToast("Есть повторяющиеся номера заказов — исправьте перед отправкой");
     if (!confirmLate()) return;
@@ -2284,7 +2284,7 @@ function ZhashylchaPanel({ date }) {
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
 
   // выгрузка «Молоко» для ОТЛ: заказы одного магазина объединены, паллеты по весу/объёму
-  const milkGroups = useMemo(() => collapseYugRows(rowsMilk), [rowsMilk]);
+  const milkGroups = useMemo(() => collapseYugRows(rowsMilk, true), [rowsMilk]);
   const consolidated = useMemo(() => {
     if (!submittedMilk) return [];
     return milkGroups.map((g) => ({
@@ -2333,7 +2333,6 @@ function ZhashylchaPanel({ date }) {
   const milkTotals = {
     pallets: milkGroups.reduce((s, g) => s + g.pallets, 0),
     weight: milkGroups.reduce((s, g) => s + g.weight, 0),
-    volume: milkGroups.reduce((s, g) => s + g.volume, 0),
   };
 
   return (
@@ -2373,8 +2372,9 @@ function ZhashylchaPanel({ date }) {
           submitted={submittedMilk}
           readOnly={!isToday}
           stores={STORES_ZHASHYLCHA}
+          weightOnly
           heading={`${ZH_DISPLAY_NAME} · Молоко`}
-          description={`Заказы на ${dateLabel}: загрузите файл из 1С или добавьте строки вручную. Магазин подбирается по названию, а если не нашёлся — выберите из списка. Заказы одного магазина объединяются в один (вес и объём суммируются). Паллеты: до 500 кг и до 1 м³ — одна паллета, больше по весу или объёму — несколько. Точка отгрузки — ${ZH_SHIP_POINT}, группа — ${ZH_GROUP}.`}
+          description={`Заказы на ${dateLabel}: загрузите файл из 1С или добавьте строки вручную. Магазин подбирается по названию, а если не нашёлся — выберите из списка. Заказы одного магазина объединяются в один (вес суммируется). Указывается только вес: до 500 кг — одна паллета, больше — несколько. Точка отгрузки — ${ZH_SHIP_POINT}, группа — ${ZH_GROUP}.`}
           dateLabel={dateLabel}
           onUpdate={updateMilk}
           onAdd={addMilk}
@@ -2406,7 +2406,7 @@ function ZhashylchaPanel({ date }) {
                   Для ОТЛ · {ZH_DISPLAY_NAME} · Молоко — {dateLabel} · {consolidated.length} заказ(ов)
                 </h2>
                 <p className="text-xs text-stone-400 mt-0.5">
-                  Заказы одного магазина объединены: номер — первого заказа, вес и объём — суммы, паллеты по суммам (500 кг / 1 м³) · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · точка отгрузки: {ZH_SHIP_POINT} · группа: {ZH_GROUP} · «СОФ» в выгрузку не входит
+                  Заказы одного магазина объединены: номер — первого заказа, вес — сумма, паллеты по весу (500 кг на паллету) · разгрузка: {PALLET_UNLOAD_SEC} с/паллету, {POINT_UNLOAD_SEC} с/точку · точка отгрузки: {ZH_SHIP_POINT} · группа: {ZH_GROUP} · «СОФ» в выгрузку не входит
                 </p>
               </div>
               <button onClick={exportZh} className="flex items-center gap-2 bg-stone-900 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-stone-700 transition-colors whitespace-nowrap">
@@ -2421,14 +2421,13 @@ function ZhashylchaPanel({ date }) {
                     <th className="text-left font-semibold px-4 py-3">Заказ №</th>
                     <th className="text-left font-semibold px-4 py-3">Объединено</th>
                     <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
-                    <th className="text-right font-semibold px-4 py-3">Объём, м³</th>
                     <th className="text-right font-semibold px-4 py-3">Паллеты</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!submittedMilk || milkGroups.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-10 text-center text-sm text-stone-400">
+                      <td colSpan={5} className="px-4 py-10 text-center text-sm text-stone-400">
                         Пока нет отправленных данных. Ждём кнопку «Отправить в транспортный отдел» во вкладке «Молоко».
                       </td>
                     </tr>
@@ -2439,7 +2438,6 @@ function ZhashylchaPanel({ date }) {
                         <td className="px-4 py-2 font-mono">{g.order}</td>
                         <td className="px-4 py-2 text-xs text-stone-500">{g.count > 1 ? `${g.count} заказа: ${g.orders.join(", ")}` : "—"}</td>
                         <td className="px-4 py-2 text-right font-mono text-stone-600">{g.weight}</td>
-                        <td className="px-4 py-2 text-right font-mono text-stone-600">{g.volume}</td>
                         <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{g.pallets}</td>
                       </tr>
                     ))
@@ -2450,7 +2448,6 @@ function ZhashylchaPanel({ date }) {
                     <tr className="border-t border-stone-200 bg-stone-50">
                       <td colSpan={3} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
                       <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(milkTotals.weight * 100) / 100}</td>
-                      <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(milkTotals.volume * 100) / 100}</td>
                       <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{milkTotals.pallets}</td>
                     </tr>
                   </tfoot>
@@ -2596,7 +2593,7 @@ function YugDateBar({ date, onChange }) {
 }
 
 // ---------------------------------------------------------------------------
-// Север: Садыгалиева (заморозка), ККЦП, Хлебзавод — обычные формы, своя коллекция,
+// Регионы (бывший «Север»): Садыгалиева (заморозка), ККЦП, Хлебзавод — обычные формы, своя коллекция,
 // любая дата (по календарю сверху); РЦ Жашылча (Молоко/СОФ) — отдельный блок со своей
 // логикой. Список магазинов пока — каракольские.
 // ---------------------------------------------------------------------------
@@ -2613,7 +2610,7 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
     <div className="space-y-5">
       <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-indigo-800">
         <Compass size={14} />
-        Север: заказы на {dateLabel}. Отдельные данные, отдельная выгрузка (только лист Orders, точка отгрузки — склад заказа). Жашылча (Молоко и СОФ) — заказы из файла 1С или вручную, точка отгрузки — РЦ Жашылча.
+        Регионы: заказы на {dateLabel}. Отдельные данные, отдельная выгрузка (только лист Orders, точка отгрузки — склад заказа). Жашылча (Молоко и СОФ) — заказы из файла 1С или вручную, точка отгрузки — РЦ Жашылча.
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
@@ -2640,13 +2637,13 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
           );
         })}
         <button onClick={() => onSubChange("otl")} className={pill(sub === "otl")}>
-          <Truck size={14} /> Для ОТЛ (Север)
+          <Truck size={14} /> Для ОТЛ (Регионы)
         </button>
       </div>
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
-          <Loader2 size={16} className="animate-spin" /> Загрузка данных Севера за {dateLabel}…
+          <Loader2 size={16} className="animate-spin" /> Загрузка данных («Регионы») за {dateLabel}…
         </div>
       ) : sub === "otl" ? (
         <OtlPanel
@@ -2656,7 +2653,7 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
           dateLabel={dateLabel}
           warehouses={SEVER_STATUS_WHS}
           showTransport={false}
-          titlePrefix="Север"
+          titlePrefix="Регионы"
         />
       ) : SEVER_ZH_KEYS.includes(sub) ? (
         <YugZhashylchaPanel
@@ -2665,7 +2662,7 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
           submitted={sDay[`submitted_${sub}`]}
           dateLabel={dateLabel}
           stores={SEVER_STORES}
-          heading={`Север · ${SEVER_ZH_FORMS.find((f) => f.id === sub).name}`}
+          heading={`Регионы · ${SEVER_ZH_FORMS.find((f) => f.id === sub).name}`}
           onUpdate={(rowId, field, value) => zh.onUpdate(sub, rowId, field, value)}
           onAdd={() => zh.onAdd(sub)}
           onRemove={(rowId) => zh.onRemove(sub, rowId)}
@@ -2677,7 +2674,7 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
         <WarehousePanel
           key={`sever_${whId}`}
           wh={SEVER_WHS.find((w) => w.id === whId)}
-          prefix="Север"
+          prefix="Регионы"
           rows={sDay[`rows_${whId}`] || []}
           submitted={sDay[`submitted_${whId}`]}
           duplicateOrders={whp.duplicates}
@@ -2781,7 +2778,7 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, wh
   );
 }
 
-function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdate, onAdd, onRemove, onSubmit, onUnlock, onFile, stores = HOLOD_YUG_STORES, heading, description, readOnly = false }) {
+function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdate, onAdd, onRemove, onSubmit, onUnlock, onFile, stores = HOLOD_YUG_STORES, heading, description, readOnly = false, weightOnly = false }) {
   // архивный просмотр: всё заблокировано, но без плашки «отправлено»
   const submitted = Boolean(submittedProp) || readOnly;
   const fileRef = useRef(null);
@@ -2796,7 +2793,7 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
     return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
   }, [rows]);
 
-  const collapsed = useMemo(() => collapseYugRows(rows), [rows]);
+  const collapsed = useMemo(() => collapseYugRows(rows, weightOnly), [rows, weightOnly]);
   const totalPallets = collapsed.reduce((s, g) => s + g.pallets, 0);
   const totalWeight = collapsed.reduce((s, g) => s + g.weight, 0);
   const noStoreCount = rows.filter((r) => yugHasData(r) && !r.store).length;
@@ -2866,13 +2863,13 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
               <th className="text-left font-semibold px-4 py-3 w-44">Заказ №</th>
               <th className="text-left font-semibold px-4 py-3">Магазин</th>
               <th className="text-left font-semibold px-4 py-3 w-32">Вес, кг</th>
-              <th className="text-left font-semibold px-4 py-3 w-32">Объём, м³</th>
+              {!weightOnly && <th className="text-left font-semibold px-4 py-3 w-32">Объём, м³</th>}
               <th className="px-4 py-3 w-10" />
             </tr>
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const issues = yugIssues(r);
+              const issues = yugIssues(r, false, weightOnly);
               const isDupe = String(r.order || "").trim() && dupOrders.has(r.order.trim().toLowerCase());
               return (
                 <tr key={r.id} className="border-t border-stone-100 align-top">
@@ -2906,7 +2903,7 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
                       className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
                     />
                   </td>
-                  <td className="px-4 py-2">
+                  {!weightOnly && <td className="px-4 py-2">
                     <input
                       type="text" inputMode="decimal" disabled={submitted} value={r.volume}
                       onChange={(e) => onUpdate(r.id, "volume", e.target.value)}
@@ -2914,7 +2911,7 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
                       className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
                     />
                     {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите вес или объём</div>}
-                  </td>
+                  </td>}
                   <td className="px-4 py-2 text-center">
                     {!submitted && (
                       <button onClick={() => onRemove(r.id)} className="text-stone-300 hover:text-rose-500 transition-colors">
@@ -2938,7 +2935,7 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
         <div>
           <h2 className="text-sm font-bold uppercase tracking-wide text-stone-500 mb-1">Что уйдёт в ОТЛ · {collapsed.length} заказ(ов)</h2>
           <p className="text-xs text-stone-400 mb-3">
-            Заказы одного магазина объединены: номер — первого заказа, вес и объём — суммы, паллеты считаются по суммам.
+            {weightOnly ? "Заказы одного магазина объединены: номер — первого заказа, вес — сумма, паллеты считаются по весу." : "Заказы одного магазина объединены: номер — первого заказа, вес и объём — суммы, паллеты считаются по суммам."}
           </p>
           <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
             <table className="w-full text-sm">
@@ -2948,7 +2945,7 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
                   <th className="text-left font-semibold px-4 py-3">Заказ №</th>
                   <th className="text-left font-semibold px-4 py-3">Объединено</th>
                   <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
-                  <th className="text-right font-semibold px-4 py-3">Объём, м³</th>
+                  {!weightOnly && <th className="text-right font-semibold px-4 py-3">Объём, м³</th>}
                   <th className="text-right font-semibold px-4 py-3">Паллеты</th>
                 </tr>
               </thead>
@@ -2959,7 +2956,7 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
                     <td className="px-4 py-2 font-mono">{g.order}</td>
                     <td className="px-4 py-2 text-xs text-stone-500">{g.count > 1 ? `${g.count} заказа: ${g.orders.join(", ")}` : "—"}</td>
                     <td className="px-4 py-2 text-right font-mono text-stone-600">{g.weight}</td>
-                    <td className="px-4 py-2 text-right font-mono text-stone-600">{g.volume}</td>
+                    {!weightOnly && <td className="px-4 py-2 text-right font-mono text-stone-600">{g.volume}</td>}
                     <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{g.pallets}</td>
                   </tr>
                 ))}
@@ -2968,7 +2965,7 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
                 <tr className="border-t border-stone-200 bg-stone-50">
                   <td colSpan={3} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(totalWeight * 100) / 100}</td>
-                  <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(collapsed.reduce((s, g) => s + g.volume, 0) * 100) / 100}</td>
+                  {!weightOnly && <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(collapsed.reduce((s, g) => s + g.volume, 0) * 100) / 100}</td>}
                   <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{totalPallets}</td>
                 </tr>
               </tfoot>
