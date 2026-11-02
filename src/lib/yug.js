@@ -67,7 +67,7 @@ const round3 = (x) => Math.round(x * 1000) / 1000;
 
 // заказы одного магазина схлопываются в один: вес и объём суммируются,
 // паллеты считаются по суммам, номером остаётся номер первого заказа
-export const collapseYugRows = (rows) => {
+export const collapseYugRows = (rows, weightOnly = false) => {
   const groups = [];
   const byStore = new Map();
   rows.forEach((r) => {
@@ -94,7 +94,7 @@ export const collapseYugRows = (rows) => {
   groups.forEach((g) => {
     g.weight = round3(g.weight);
     g.volume = round3(g.volume);
-    g.pallets = yugPallets(g.weight, g.volume);
+    g.pallets = yugPallets(g.weight, weightOnly ? 0 : g.volume);
   });
   return groups;
 };
