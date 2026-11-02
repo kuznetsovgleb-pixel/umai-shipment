@@ -1950,6 +1950,16 @@ const emptyZhDay = () => ({
 });
 
 // блок ввода заказов одной формы (СОФ или Молоко)
+// СОФ (основная РЦ Жашылча): только № заказа, магазин и вес
+const sofIssues = (r) => {
+  const hasData = Boolean(String(r.order || "").trim() || r.store || r.weight);
+  if (!hasData) return { hasData: false, missingOrder: false, missingStore: false, missingWeight: false, incomplete: false };
+  const missingOrder = !String(r.order || "").trim();
+  const missingStore = !r.store;
+  const missingWeight = !(parseFloat(r.weight) > 0);
+  return { hasData: true, missingOrder, missingStore, missingWeight, incomplete: missingOrder || missingStore || missingWeight };
+};
+
 function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpdate, onAdd, onRemove, onSubmit, onUnlock, dateLabel }) {
   const duplicateStores = useMemo(() => findDuplicateStores(rows), [rows]);
   const locked = !canEdit || submitted;
@@ -1962,9 +1972,8 @@ function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpd
             <span className="h-2 w-2 rounded-full bg-cyan-500" /> Склад · {ZH_DISPLAY_NAME} · {title}
           </div>
           <p className="text-sm text-stone-500">
-            Заказ №, количество евро- и американских паллет (шаг 0,5), коробок и вес на {dateLabel}. Магазин выбирается из списка.
-            Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее).
-                      </p>
+            Заказ №, магазин и вес на {dateLabel}. Магазин выбирается из списка (можно искать по номеру или названию).
+          </p>
         </div>
       </div>
 
@@ -1988,9 +1997,6 @@ function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpd
               <th className="text-left font-semibold px-4 py-3 w-10">#</th>
               <th className="text-left font-semibold px-4 py-3 w-40">Заказ №</th>
               <th className="text-left font-semibold px-4 py-3">Магазин</th>
-              <th className="text-left font-semibold px-4 py-3 w-28">Евро</th>
-              <th className="text-left font-semibold px-4 py-3 w-28">Американцы</th>
-              <th className="text-left font-semibold px-4 py-3 w-28">Коробки</th>
               <th className="text-left font-semibold px-4 py-3 w-28">Вес, кг</th>
               <th className="px-4 py-3 w-10" />
             </tr>
@@ -1999,7 +2005,7 @@ function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpd
             {rows.map((r, i) => {
               const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
               const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
-              const issues = rowIssues(r, true, "euroAmericanBoxes");
+              const issues = sofIssues(r);
               const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
               const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
               return (
@@ -2023,31 +2029,6 @@ function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpd
                     />
                     {issues.missingStore && <div className="text-xs text-rose-600 mt-1">Выберите магазин</div>}
                     {!issues.missingStore && isDupeStore && <div className="text-xs text-rose-600 mt-1">На этот магазин уже есть заказ — проверьте дубли</div>}
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="text" inputMode="decimal" disabled={locked} value={r.euro}
-                      onChange={(e) => onUpdate(r.id, "euro", e.target.value)}
-                      placeholder="0"
-                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="text" inputMode="decimal" disabled={locked} value={r.american}
-                      onChange={(e) => onUpdate(r.id, "american", e.target.value)}
-                      placeholder="0"
-                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
-                    />
-                    {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите евро, американца или коробки</div>}
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      type="text" inputMode="numeric" disabled={locked} value={r.boxes}
-                      onChange={(e) => onUpdate(r.id, "boxes", e.target.value)}
-                      placeholder="0"
-                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
-                    />
                   </td>
                   <td className="px-4 py-2">
                     <input
@@ -2212,7 +2193,7 @@ function ZhashylchaPanel({ date }) {
     }
     const res = parseYugFile(buf, STORES_ZHASHYLCHA);
     if (res.error) return showToast(res.error);
-    const merged = mergeYugLines(rowsMilk, res.lines, true);
+    const merged = mergeYugLines(rowsMilk, res.lines);
     patchRows("milk", () => merged.rows);
     const noStore = res.lines.filter((l) => !l.store).length;
     showToast(
@@ -2226,7 +2207,7 @@ function ZhashylchaPanel({ date }) {
   const submitMilk = async () => {
     const rows = rowsMilk.filter(yugHasData);
     if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
-    const bad = rows.filter((r) => yugIssues(r, false, true).incomplete).length;
+    const bad = rows.filter((r) => yugIssues(r).incomplete).length;
     if (bad > 0) return showToast(bad === 1 ? "Одна строка заполнена не полностью — проверьте подсвеченные поля" : `${bad} строк заполнены не полностью — проверьте подсвеченные поля`);
     if (rows.some((r) => duplicateOrders.has(r.order.trim().toLowerCase()))) return showToast("Есть повторяющиеся номера заказов — исправьте перед отправкой");
     if (!confirmLate()) return;
@@ -2238,9 +2219,9 @@ function ZhashylchaPanel({ date }) {
     }
   };
   const submitSof = async () => {
-    const filled = rowsSof.filter((r) => rowIssues(r, true, "euroAmericanBoxes").hasData);
+    const filled = rowsSof.filter((r) => sofIssues(r).hasData);
     if (filled.length === 0) return showToast("Нет заполненных строк для отправки");
-    const incompleteCount = filled.filter((r) => rowIssues(r, true, "euroAmericanBoxes").incomplete).length;
+    const incompleteCount = filled.filter((r) => sofIssues(r).incomplete).length;
     if (incompleteCount > 0) {
       return showToast(
         incompleteCount === 1
@@ -2284,7 +2265,7 @@ function ZhashylchaPanel({ date }) {
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
 
   // выгрузка «Молоко» для ОТЛ: заказы одного магазина объединены, паллеты по весу/объёму
-  const milkGroups = useMemo(() => collapseYugRows(rowsMilk, true), [rowsMilk]);
+  const milkGroups = useMemo(() => collapseYugRows(rowsMilk), [rowsMilk]);
   const consolidated = useMemo(() => {
     if (!submittedMilk) return [];
     return milkGroups.map((g) => ({
@@ -2333,6 +2314,7 @@ function ZhashylchaPanel({ date }) {
   const milkTotals = {
     pallets: milkGroups.reduce((s, g) => s + g.pallets, 0),
     weight: milkGroups.reduce((s, g) => s + g.weight, 0),
+    volume: milkGroups.reduce((s, g) => s + g.volume, 0),
   };
 
   return (
@@ -2372,9 +2354,8 @@ function ZhashylchaPanel({ date }) {
           submitted={submittedMilk}
           readOnly={!isToday}
           stores={STORES_ZHASHYLCHA}
-          weightOnly
           heading={`${ZH_DISPLAY_NAME} · Молоко`}
-          description={`Заказы на ${dateLabel}: загрузите файл из 1С или добавьте строки вручную. Магазин подбирается по названию, а если не нашёлся — выберите из списка. Заказы одного магазина объединяются в один (вес суммируется). Указывается только вес: до 500 кг — одна паллета, больше — несколько. Точка отгрузки — ${ZH_SHIP_POINT}, группа — ${ZH_GROUP}.`}
+          description={`Заказы на ${dateLabel}: загрузите файл из 1С или добавьте строки вручную. Магазин подбирается по названию, а если не нашёлся — выберите из списка. Заказы одного магазина объединяются в один (вес и объём суммируются). Паллеты: до 500 кг и до 1 м³ — одна паллета, больше по весу или объёму — несколько. Точка отгрузки — ${ZH_SHIP_POINT}, группа — ${ZH_GROUP}.`}
           dateLabel={dateLabel}
           onUpdate={updateMilk}
           onAdd={addMilk}
@@ -2421,13 +2402,14 @@ function ZhashylchaPanel({ date }) {
                     <th className="text-left font-semibold px-4 py-3">Заказ №</th>
                     <th className="text-left font-semibold px-4 py-3">Объединено</th>
                     <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
+                    <th className="text-right font-semibold px-4 py-3">Объём, м³</th>
                     <th className="text-right font-semibold px-4 py-3">Паллеты</th>
                   </tr>
                 </thead>
                 <tbody>
                   {!submittedMilk || milkGroups.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="px-4 py-10 text-center text-sm text-stone-400">
+                      <td colSpan={6} className="px-4 py-10 text-center text-sm text-stone-400">
                         Пока нет отправленных данных. Ждём кнопку «Отправить в транспортный отдел» во вкладке «Молоко».
                       </td>
                     </tr>
@@ -2438,6 +2420,7 @@ function ZhashylchaPanel({ date }) {
                         <td className="px-4 py-2 font-mono">{g.order}</td>
                         <td className="px-4 py-2 text-xs text-stone-500">{g.count > 1 ? `${g.count} заказа: ${g.orders.join(", ")}` : "—"}</td>
                         <td className="px-4 py-2 text-right font-mono text-stone-600">{g.weight}</td>
+                        <td className="px-4 py-2 text-right font-mono text-stone-600">{g.volume}</td>
                         <td className="px-4 py-2 text-right font-mono font-semibold text-stone-900">{g.pallets}</td>
                       </tr>
                     ))
@@ -2448,6 +2431,7 @@ function ZhashylchaPanel({ date }) {
                     <tr className="border-t border-stone-200 bg-stone-50">
                       <td colSpan={3} className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-stone-500">Итого</td>
                       <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(milkTotals.weight * 100) / 100}</td>
+                      <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{Math.round(milkTotals.volume * 100) / 100}</td>
                       <td className="px-4 py-2.5 text-right font-mono font-bold text-stone-900">{milkTotals.pallets}</td>
                     </tr>
                   </tfoot>
