@@ -111,10 +111,17 @@ const CATEGORY_OPTIONS = ["Сухой", "Оборудование", "Сыпуч�
 
 // магазины, которые встречаются в списке склада больше одного раза —
 // на один магазин может быть только один заказ
-const findDuplicateStores = (rows) => {
+// byCategory — склад, где на один магазин можно несколько заказов, но с разными категориями:
+// дублем считается только пара «магазин + категория»
+const storeDupKey = (r, byCategory = false) => {
+  const k = r.store.trim().toLowerCase();
+  return byCategory ? `${k}|${r.category || ""}` : k;
+};
+const findDuplicateStores = (rows, byCategory = false) => {
   const counts = {};
   rows.forEach((r) => {
-    const key = r.store.trim().toLowerCase();
+    if (!r.store.trim()) return;
+    const key = storeDupKey(r, byCategory);
     if (!key) return;
     counts[key] = (counts[key] || 0) + 1;
   });
@@ -164,9 +171,11 @@ const submitCheck = (wh, allRows, duplicateOrders) => {
   if (rows.some((r) => duplicateOrders.has(r.order.trim().toLowerCase()))) {
     return "Есть повторяющиеся номера заказов — исправьте перед отправкой";
   }
-  const dupStores = findDuplicateStores(rows);
-  if (rows.some((r) => dupStores.has(r.store.trim().toLowerCase()))) {
-    return "На один магазин может быть только один заказ — исправьте повторяющиеся магазины";
+  const dupStores = findDuplicateStores(rows, wh.storeDupByCategory);
+  if (rows.some((r) => dupStores.has(storeDupKey(r, wh.storeDupByCategory)))) {
+    return wh.storeDupByCategory
+      ? "На один магазин в одной категории может быть только один заказ — исправьте повторы"
+      : "На один магазин может быть только один заказ — исправьте повторяющиеся магазины";
   }
   return null;
 };
@@ -240,7 +249,15 @@ const consolidateRows = (warehouses, dayData) => {
 const YUG_WH_IDS = ["sagadalieva_zamorozka", "hlebzavod", "kkcp"];
 const YUG_WHS = YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
 const REGION_WHS = REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
-const SEVER_WHS = SEVER_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
+// в «Регионах» у Хлебзавода категория выбирается по каждому заказу (Заморозка / Сухой),
+// и на один магазин можно несколько заказов — с разными категориями
+const SEVER_WH_OVERRIDES = {
+  hlebzavod: { perOrderCategory: true, categories: ["Заморозка", "Сухой"], storeDupByCategory: true },
+};
+const SEVER_WHS = SEVER_WAREHOUSE_IDS.map((id) => {
+  const w = WAREHOUSES.find((x) => x.id === id);
+  return SEVER_WH_OVERRIDES[id] ? { ...w, ...SEVER_WH_OVERRIDES[id] } : w;
+});
 const SEVER_ZH_FORMS = [
   { id: "zh_milk", name: "Жашылча · Молоко", accent: "cyan" },
   { id: "zh_sof", name: "Жашылча · СОФ", accent: "cyan" },
@@ -534,7 +551,7 @@ function useRegionDay({ date, store, warehouses, label, saveTimers, showToast })
   const remove = (whId, rowId) =>
     patchRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
   const submit = async (whId) => {
-    const wh = WAREHOUSES.find((w) => w.id === whId);
+    const wh = warehouses.find((w) => w.id === whId);
     const err = submitCheck(wh, day[`rows_${whId}`] || [], duplicates);
     if (err) return showToast(err);
     try {
@@ -1226,7 +1243,8 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
   const requiresWeight = Boolean(wh.requiresWeight);
   const requiresCategory = Boolean(wh.perOrderCategory);
   const qtyMode = wh.qtyMode || "default";
-  const duplicateStores = useMemo(() => findDuplicateStores(rows), [rows]);
+  const byCat = Boolean(wh.storeDupByCategory);
+  const duplicateStores = useMemo(() => findDuplicateStores(rows, byCat), [rows, byCat]);
 
   const qtyDescription =
     qtyMode === "euroAmerican" ? "количество евро- и американских паллет" :
@@ -1299,7 +1317,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
           <tbody>
             {rows.map((r, i) => {
               const isDupe = r.order.trim() && duplicateOrders.has(r.order.trim().toLowerCase());
-              const isDupeStore = r.store && duplicateStores.has(r.store.trim().toLowerCase());
+              const isDupeStore = r.store && duplicateStores.has(storeDupKey(r, byCat));
               const issues = rowIssues(r, requiresWeight, qtyMode, requiresCategory);
               const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-400";
               const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
@@ -1445,7 +1463,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                         className={`w-full text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 bg-white ${issues.missingCategory ? errBorder : okBorder}`}
                       >
                         <option value="">— выбрать категорию —</option>
-                        {CATEGORY_OPTIONS.map((c) => (
+                        {(wh.categories || CATEGORY_OPTIONS).map((c) => (
                           <option key={c} value={c}>{c}</option>
                         ))}
                       </select>
