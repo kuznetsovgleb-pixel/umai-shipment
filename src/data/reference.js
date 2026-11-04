@@ -704,6 +704,12 @@ export const SEVER_STORES = [...SEVER_STORES_RAW].sort((x, y) =>
 );
 // Основные вкладки ККЦП и Хлебзавод: без южных (они в Холод Юг), каракольских и магазинов Севера (они в Севере)
 export const STORES_NO_SEVER = STORES_NO_YUG.filter((s) => !SEVER_STORES.includes(s));
+// основная вкладка Хлебзавод: то же, плюс эти Глобусы (они есть и в «Регионах»)
+const HLEBZAVOD_EXTRA = [
+  "Глобус 2 Сокулук", "Глобус10 Ново-Павловка", "Глобус17 Токмок", "Глобус51 Кант",
+  "Глобус52 Байтик", "Глобус81 Ивановка", "Глобус86 Майрам Апа", "Глобус93 Таш-Мойнок",
+];
+export const STORES_HLEBZAVOD = STORES_NO_YUG.filter((s) => !SEVER_STORES.includes(s) || HLEBZAVOD_EXTRA.includes(s));
 
 
 // итог на ГМ = паллеты + роллкейджи × коэффициент
