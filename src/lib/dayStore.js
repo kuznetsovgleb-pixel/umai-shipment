@@ -39,6 +39,8 @@ export const emptyDay = () => ({
   rows_sagadalieva_zamorozka: [makeEmptyRow()],
   rows_hlebzavod: [makeEmptyRow()],
   rows_kkcp: [makeEmptyRow()],
+  rows_kcp: [makeEmptyRow()],
+  rows_sendvichi: [makeEmptyRow()],
   rows_transit_yug: [makeEmptyRow()],
   rows_transit_sever: [makeEmptyRow()],
   submitted_prigorodnoe: false,
@@ -48,6 +50,8 @@ export const emptyDay = () => ({
   submitted_sagadalieva_zamorozka: false,
   submitted_hlebzavod: false,
   submitted_kkcp: false,
+  submitted_kcp: false,
+  submitted_sendvichi: false,
   submitted_transit_yug: false,
   submitted_transit_sever: false,
   vehicles: seedVehiclesForDay(),
@@ -60,7 +64,14 @@ export function subscribeToDay(date, onChange, onError) {
     dayRef(date),
     (snap) => {
       if (snap.exists()) {
-        onChange(snap.data());
+        // в днях, созданных до появления КЦП/Сендвичей, этих полей нет — подставляем пустые
+        const data = snap.data();
+        const fill = {};
+        ["kcp", "sendvichi"].forEach((id) => {
+          if (!data[`rows_${id}`]) fill[`rows_${id}`] = [makeEmptyRow()];
+          if (data[`submitted_${id}`] === undefined) fill[`submitted_${id}`] = false;
+        });
+        onChange({ ...data, ...fill });
       } else {
         const seed = emptyDay();
         // merge:true — на случай, если два клиента одновременно откроют
