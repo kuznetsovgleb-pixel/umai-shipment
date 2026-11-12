@@ -41,7 +41,8 @@ export function buildWorkbook(dateIso, consolidated, vehicles, options = {}) {
   ];
   // options.nextDayExcept — набор магазинов, у которых дата остаётся текущей; остальным +1 день
   const ordersRows = consolidated.map((r) => {
-    const shifted = Boolean(options.nextDayExcept) && !options.nextDayExcept.has(r.store);
+    // r.shiftDay — склады с подачей «сегодня на завтра» (КЦП, Сендвичи): дата выгрузки +1 день
+    const shifted = Boolean(r.shiftDay) || (Boolean(options.nextDayExcept) && !options.nextDayExcept.has(r.store));
     const dIso = shifted ? addDaysIso(dateIso, 1) : dateIso;
     return [
       `${r.order}_${fmtDateCompact(dIso)}`, fmtDateRu(dIso), r.shipPoint, r.store,
