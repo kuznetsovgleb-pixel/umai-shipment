@@ -602,6 +602,11 @@ export const WAREHOUSES = [
   { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose", shipPoint: "РЦ Садыгалиева - заморозка", qtyMode: "palletsBoxes" },
   { id: "hlebzavod", name: "Хлебзавод", accent: "amber", shipPoint: "СП Хлебозавод", qtyMode: "palletsBoxes" },
   { id: "kkcp", name: "ККЦП", accent: "violet", shipPoint: "Кондитерское Центральное Производство", qtyMode: "palletsBoxes" },
+  // КЦП и Сендвичи: только коробки, подача сегодня на завтра (дата выгрузки = дата подачи + 1 день),
+  // номер заказа генерируется автоматически: ддммгг (дата отгрузки) + код склада + порядковый номер.
+  // shipPoint — название точки отгрузки в TMS (при необходимости поправьте под справочник TMS).
+  { id: "kcp", name: "КЦП", accent: "cyan", shipPoint: "Кулинарное Производство", qtyMode: "boxes", shipNextDay: true, autoOrderCode: "601" },
+  { id: "sendvichi", name: "Сендвичи (Медерова)", accent: "fuchsia", shipPoint: "СП Глобус 26 Цех", qtyMode: "boxes", shipNextDay: true, autoOrderCode: "602" },
   { id: "transit_yug", name: "Транзит Юг", accent: "teal", shipPoint: "РЦ Транзит Юг", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
   { id: "transit_sever", name: "Транзит Север", accent: "lime", shipPoint: "РЦ Транзит Север", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
 ];
