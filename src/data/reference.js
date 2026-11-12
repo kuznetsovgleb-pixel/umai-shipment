@@ -243,16 +243,19 @@ export const STORES = [
   "SPAR-01 ЦГ СП",
   "SPAR-12 Манаса СП",
   "SPAR-16 Юг-2 СП",
+  "Darkstore",
   "Архив",
   "Склад Оборудования"
 ];
 // Магазины Каракола: на вкладках Каракола — только они, на остальных вкладках их нет
-export const KARAKOL_STORES = [
+const KARAKOL_ONLY_STORES = [
   "Глобус30", "Глобус43", "Глобус53", "Глобус58", "Глобус60", "Глобус64", "Глобус98",
   "Достор14", "Достор17", "Достор20", "Достор23", "Достор26", "Достор40",
   "Бактуу Долоноту",
 ];
-export const STORES_NO_KARAKOL = STORES.filter((s) => !KARAKOL_STORES.includes(s));
+// Darkstore есть на всех вкладках, кроме «Регионы», поэтому на вкладках Каракола он тоже доступен
+export const KARAKOL_STORES = [...KARAKOL_ONLY_STORES, "Darkstore"];
+export const STORES_NO_KARAKOL = STORES.filter((s) => !KARAKOL_ONLY_STORES.includes(s));
 
 // Магазины Холода Юга (ГЛ — Глобус, Д — Достор): на вкладке «Холод Юг» — только они;
 // на складах Садыгалиева (заморозка), Транзит Юг, Хлебзавод, ККЦП и Жашылча (ночная) в основных вкладках их нет
@@ -270,7 +273,7 @@ const yugStoreOf = (code) => {
 };
 // «РЦ Ош» — доступен на вкладке «Холод Юг» и остаётся в списках остальных вкладок
 const YUG_STORES_BY_CODE = YUG_CODES.map(yugStoreOf).filter(Boolean);
-export const HOLOD_YUG_STORES = [...YUG_STORES_BY_CODE, "РЦ Ош"];
+export const HOLOD_YUG_STORES = [...YUG_STORES_BY_CODE, "РЦ Ош", "Darkstore"];
 export const STORES_NO_YUG = STORES_NO_KARAKOL.filter((s) => !YUG_STORES_BY_CODE.includes(s));
 // РЦ Жашылча: все магазины, включая каракольские, кроме 40 южных (они в Холод Юг)
 export const STORES_ZHASHYLCHA = STORES.filter((s) => !YUG_STORES_BY_CODE.includes(s));
