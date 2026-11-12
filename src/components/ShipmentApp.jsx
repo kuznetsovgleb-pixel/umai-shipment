@@ -89,6 +89,7 @@ const rowIssues = (r, requiresWeight = false, qtyMode = "default", requiresCateg
     qtyMode === "euroAmerican" ? (r.euro !== "" || r.american !== "") :
     qtyMode === "euroAmericanBoxes" ? (r.euro !== "" || r.american !== "" || r.boxes !== "") :
     qtyMode === "palletsBoxes" ? (r.pallets !== "" || r.boxes !== "") :
+    qtyMode === "boxes" ? r.boxes !== "" :
     qtyMode === "palletsAmericanBoxes" ? (r.pallets !== "" || r.american !== "" || r.boxes !== "") :
     (r.pallets !== "" || r.rolls !== "");
   const hasData = Boolean(r.order.trim() || r.store || qtyFilled || (r.weight && r.weight !== "") || r.category);
@@ -128,7 +129,7 @@ const findDuplicateStores = (rows, byCategory = false) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "transit_yug", "transit_sever", "zhashylcha", "karakol", "bazar_korgon", "osh", "sever", "holod_yug", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "kcp", "sendvichi", "transit_yug", "transit_sever", "zhashylcha", "karakol", "bazar_korgon", "osh", "sever", "holod_yug", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -148,6 +149,39 @@ const GROUP_BY_WAREHOUSE = {
   sagadalieva_zamorozka: "Заморозка",
   hlebzavod: "СП",
   kkcp: "СП",
+  kcp: "СП",
+  sendvichi: "СП",
+};
+
+// ISO-дата + n дней
+const addDaysIso = (iso, n) => {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
+};
+
+// дата, на которую склад подаёт заказы: у КЦП и Сендвичей — «сегодня на завтра»
+const whShipDate = (wh, dateIso) => (wh && wh.shipNextDay ? addDaysIso(dateIso, 1) : dateIso);
+
+// автономер заказа: ддммгг (дата отгрузки) + трёхзначный код склада + порядковый номер (2 цифры)
+const autoOrderPrefix = (wh, dateIso) => {
+  const [y, m, d] = whShipDate(wh, dateIso).split("-");
+  return `${d}${m}${y.slice(2)}${wh.autoOrderCode}`;
+};
+// проставляет номера строкам с данными, у которых номера ещё нет; уже выданные номера не меняются
+const assignAutoOrders = (rows, wh, dateIso) => {
+  if (!wh || !wh.autoOrderCode) return rows;
+  const prefix = autoOrderPrefix(wh, dateIso);
+  let seq = 0;
+  rows.forEach((r) => {
+    const o = (r.order || "").trim();
+    if (o.startsWith(prefix)) seq = Math.max(seq, parseInt(o.slice(prefix.length), 10) || 0);
+  });
+  return rows.map((r) => {
+    if ((r.order || "").trim()) return r;
+    if (!(r.store || r.boxes !== "")) return r;
+    seq += 1;
+    return { ...r, order: `${prefix}${String(seq).padStart(2, "0")}` };
+  });
 };
 
 // очистка значения поля строки заказа по его типу
@@ -209,6 +243,9 @@ const consolidateRows = (warehouses, dayData) => {
         euro = parseInt(r.euro, 10) || 0;
         american = parseInt(r.american, 10) || 0;
         total = Math.ceil((euro + american * EURO_AMERICAN_COEF) * 100) / 100;
+      } else if (qtyMode === "boxes") {
+        boxes = parseInt(r.boxes, 10) || 0;
+        total = Math.ceil(boxesToPallets(boxes) * 100) / 100;
       } else if (qtyMode === "palletsBoxes") {
         pallets = parseInt(r.pallets, 10) || 0;
         boxes = parseInt(r.boxes, 10) || 0;
@@ -224,7 +261,7 @@ const consolidateRows = (warehouses, dayData) => {
         total = Math.ceil((pallets + rolls * COEFFICIENT) * 100) / 100;
       }
 
-      const fallbackWeight = (qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes") ? total * PALLET_KG : (pallets || 0) * PALLET_KG + (rolls || 0) * ROLL_KG;
+      const fallbackWeight = (qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes" || qtyMode === "boxes") ? total * PALLET_KG : (pallets || 0) * PALLET_KG + (rolls || 0) * ROLL_KG;
       const unloadSec = w.unloadPerPalletSec || PALLET_UNLOAD_SEC;
 
       rows.push({
@@ -234,6 +271,7 @@ const consolidateRows = (warehouses, dayData) => {
         weight: weight === null ? Math.round(fallbackWeight * 100) / 100 : Math.round(weight * 100) / 100,
         total,
         unloadSec,
+        shiftDay: Boolean(w.shipNextDay),
         group: w.perOrderCategory ? (r.category || "") : (GROUP_BY_WAREHOUSE[w.id] || ""),
       });
     });
@@ -765,11 +803,15 @@ export default function ShipmentApp() {
   );
 
   const updateRow = (whId, rowId, field, value) => {
+    const whCfg = WAREHOUSES.find((w) => w.id === whId);
     patchWarehouseRows(whId, (rows) =>
-      rows.map((r) => {
-        if (r.id !== rowId) return r;
-        return { ...r, [field]: sanitizeField(field, value) };
-      })
+      assignAutoOrders(
+        rows.map((r) => {
+          if (r.id !== rowId) return r;
+          return { ...r, [field]: sanitizeField(field, value) };
+        }),
+        whCfg, date
+      )
     );
   };
   const pasteQty = (whId, rowId, field, raw) => updateRow(whId, rowId, field, sanitizeQty(raw));
@@ -1200,7 +1242,7 @@ export default function ShipmentApp() {
             onRemove={(rowId) => removeRow(activeTab, rowId)}
             onSubmit={() => submitWarehouse(activeTab)}
             onUnlock={() => unlockWarehouse(activeTab)}
-            dateLabel={fmtDateRu(date)}
+            dateLabel={fmtDateRu(whShipDate(WAREHOUSES.find((w) => w.id === activeTab), date))}
             stores={activeTab === "hlebzavod" ? STORES_HLEBZAVOD : activeTab === "kkcp" ? STORES_NO_SEVER : YUG_WAREHOUSE_IDS.includes(activeTab) ? STORES_NO_YUG : STORES_NO_KARAKOL}
           />
         ) : (
@@ -1249,6 +1291,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
   const qtyDescription =
     qtyMode === "euroAmerican" ? "количество евро- и американских паллет" :
     qtyMode === "palletsBoxes" ? "количество паллет и коробок" :
+    qtyMode === "boxes" ? "количество коробок" :
     qtyMode === "palletsAmericanBoxes" ? "количество паллет, американцев и коробок" :
     "количество паллет и роллкейджей";
 
@@ -1260,8 +1303,8 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
             <span className={`h-2 w-2 rounded-full ${a.dot}`} /> {prefix} · {wh.name}
           </div>
           <p className="text-sm text-stone-500">
-            Заказ №, {qtyDescription}{requiresWeight ? ", вес" : ""}{requiresCategory ? ", товарная категория" : ""} на {dateLabel}. Магазин выбирается из списка (можно искать по номеру или названию).
-            {(qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes") && " Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее)."}
+            {wh.autoOrderCode ? "Номер заказа присваивается автоматически" : "Заказ №"}, {qtyDescription}{requiresWeight ? ", вес" : ""}{requiresCategory ? ", товарная категория" : ""} на {dateLabel}. Магазин выбирается из списка (можно искать по номеру или названию).
+            {(qtyMode === "palletsBoxes" || qtyMode === "palletsAmericanBoxes" || qtyMode === "boxes") && " Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 20–40 — целая паллета и так далее)."}
             {qtyMode === "palletsAmericanBoxes" && " Вес считается автоматически, вручную вводить не нужно."}
           </p>
         </div>
@@ -1290,6 +1333,7 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                   <th className="text-left font-semibold px-4 py-3 w-32">Американцы</th>
                 </>
               )}
+              {qtyMode === "boxes" && <th className="text-left font-semibold px-4 py-3 w-32">Коробки</th>}
               {qtyMode === "palletsBoxes" && (
                 <>
                   <th className="text-left font-semibold px-4 py-3 w-32">Паллеты</th>
@@ -1326,9 +1370,9 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                   <td className="px-4 py-2 text-stone-400 font-mono text-xs pt-2.5">{i + 1}</td>
                   <td className="px-4 py-2">
                     <input
-                      type="text" disabled={submitted} value={r.order}
+                      type="text" disabled={submitted || Boolean(wh.autoOrderCode)} value={r.order}
                       onChange={(e) => onUpdate(r.id, "order", e.target.value)}
-                      placeholder="напр. 100234"
+                      placeholder={wh.autoOrderCode ? "авто" : "напр. 100234"}
                       className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${isDupe || issues.missingOrder ? errBorder : okBorder}`}
                     />
                     {isDupe && <div className="text-xs text-rose-600 mt-1">Номер дублируется</div>}
@@ -1365,6 +1409,18 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
                         {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите евро или американец</div>}
                       </td>
                     </>
+                  )}
+                  {qtyMode === "boxes" && (
+                    <td className="px-4 py-2">
+                      <input
+                        type="text" inputMode="numeric" disabled={submitted} value={r.boxes}
+                        onChange={(e) => onUpdate(r.id, "boxes", e.target.value)}
+                        onPaste={(e) => { e.preventDefault(); onPasteQty(r.id, "boxes", e.clipboardData.getData("text")); }}
+                        placeholder="0"
+                        className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                      />
+                      {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите коробки</div>}
+                    </td>
                   )}
                   {qtyMode === "palletsBoxes" && (
                     <>
