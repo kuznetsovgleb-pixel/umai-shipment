@@ -1,5 +1,5 @@
 import * as XLSX from "xlsx";
-import { STORES, STORE_WINDOWS, ZHASHYLCHA_NIGHT_STORES, POINT_UNLOAD_SEC, KARAKOL_POINT, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, BAZAR_KORGON_POINT, OSH_POINT } from "../data/reference";
+import { STORES, STORE_WINDOWS, ZHASHYLCHA_NIGHT_STORES, POINT_UNLOAD_SEC, KARAKOL_POINT, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, BAZAR_KORGON_POINT, OSH_POINT } from "../data/reference";
 
 const fmtDateRu = (iso) => {
   if (!iso) return "";
@@ -190,7 +190,7 @@ export function buildRegionWorkbook(dateIso, consolidated, cfg) {
 
 const KARAKOL_CFG = { point: KARAKOL_POINT, whIds: KARAKOL_WAREHOUSE_IDS, prefix: "003" };
 export const BAZAR_KORGON_CFG = { point: BAZAR_KORGON_POINT, whIds: REGION_WAREHOUSE_IDS, prefix: "004" };
-export const OSH_CFG = { point: OSH_POINT, whIds: REGION_WAREHOUSE_IDS, prefix: "005" };
+export const OSH_CFG = { point: OSH_POINT, whIds: OSH_WAREHOUSE_IDS, prefix: "005" };
 
 export const buildKarakolTransfers = (dateIso, consolidated) => buildRegionTransfers(dateIso, consolidated, KARAKOL_CFG);
 export const buildBazarKorgonTransfers = (dateIso, consolidated) => buildRegionTransfers(dateIso, consolidated, BAZAR_KORGON_CFG);
