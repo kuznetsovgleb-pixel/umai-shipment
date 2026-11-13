@@ -1,6 +1,6 @@
 import { doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, SEVER_WAREHOUSE_IDS } from "../data/reference";
+import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, SEVER_WAREHOUSE_IDS } from "../data/reference";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -368,7 +368,7 @@ export const subscribeToBazarKorgonDay = bazarKorgonStore.subscribe;
 export const saveBazarKorgonRows = bazarKorgonStore.saveRows;
 export const setBazarKorgonSubmitted = bazarKorgonStore.setSubmitted;
 
-const oshStore = makeRegionStore("shipments_osh", REGION_WAREHOUSE_IDS);
+const oshStore = makeRegionStore("shipments_osh", OSH_WAREHOUSE_IDS);
 export const emptyOshDay = oshStore.empty;
 export const subscribeToOshDay = oshStore.subscribe;
 export const saveOshRows = oshStore.saveRows;
