@@ -4,7 +4,7 @@ import {
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
   Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
@@ -153,6 +153,9 @@ const GROUP_BY_WAREHOUSE = {
   sendvichi: "СП",
 };
 
+// склад основной вкладки с учётом автонумерации заказов (КЦП/Сендвичи — в WAREHOUSES, остальные — по коду)
+const mainWh = (w) => (w && MAIN_AUTO_ORDER_CODES[w.id] ? { ...w, autoOrderCode: MAIN_AUTO_ORDER_CODES[w.id] } : w);
+
 // ISO-дата + n дней
 const addDaysIso = (iso, n) => {
   const [y, m, d] = iso.split("-").map(Number);
@@ -178,7 +181,7 @@ const assignAutoOrders = (rows, wh, dateIso) => {
   });
   return rows.map((r) => {
     if ((r.order || "").trim()) return r;
-    if (!(r.store || r.boxes !== "")) return r;
+    if (!(r.store || ["pallets", "rolls", "euro", "american", "boxes"].some((k) => r[k] !== "" && r[k] != null))) return r;
     seq += 1;
     return { ...r, order: `${prefix}${String(seq).padStart(2, "0")}` };
   });
@@ -287,6 +290,7 @@ const consolidateRows = (warehouses, dayData) => {
 const YUG_WH_IDS = ["sagadalieva_zamorozka", "hlebzavod", "kkcp"];
 const YUG_WHS = YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
 const REGION_WHS = REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
+const OSH_WHS = OSH_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
 // в «Регионах» у Хлебзавода категория выбирается по каждому заказу (Заморозка / Сухой),
 // и на один магазин можно несколько заказов — с разными категориями
 const SEVER_WH_OVERRIDES = {
@@ -708,7 +712,7 @@ export default function ShipmentApp() {
   const saveTimers = useRef({});
   // РЦ Базар-Коргон, РЦ Ош, Север — свои коллекции, следуют календарю сверху
   const bk = useRegionDay({ date, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", saveTimers, showToast });
-  const osh = useRegionDay({ date, store: OSH_STORE, warehouses: REGION_WHS, label: "Ош", saveTimers, showToast });
+  const osh = useRegionDay({ date, store: OSH_STORE, warehouses: OSH_WHS, label: "Ош", saveTimers, showToast });
   const sever = useRegionDay({ date, store: SEVER_STORE, warehouses: SEVER_WHS, label: "Регионы", saveTimers, showToast });
   const [severSub, setSeverSub] = useState("sagadalieva_zamorozka");
   const [bkSub, setBkSub] = useState("prigorodnoe");
@@ -803,7 +807,7 @@ export default function ShipmentApp() {
   );
 
   const updateRow = (whId, rowId, field, value) => {
-    const whCfg = WAREHOUSES.find((w) => w.id === whId);
+    const whCfg = mainWh(WAREHOUSES.find((w) => w.id === whId));
     patchWarehouseRows(whId, (rows) =>
       assignAutoOrders(
         rows.map((r) => {
@@ -821,9 +825,13 @@ export default function ShipmentApp() {
 
   const submitWarehouse = async (whId) => {
     const wh = WAREHOUSES.find((w) => w.id === whId);
-    const err = submitCheck(wh, day[`rows_${whId}`] || [], duplicateOrders);
+    // строки с данными, но без номера (если такие остались) получают автономер перед отправкой
+    const rowsToSend = assignAutoOrders(day[`rows_${whId}`] || [], mainWh(wh), date);
+    const err = submitCheck(wh, rowsToSend, findDuplicateOrders(WAREHOUSES, { ...day, [`rows_${whId}`]: rowsToSend }));
     if (err) return showToast(err);
     try {
+      patchWarehouseRows(whId, (rows) => assignAutoOrders(rows, mainWh(wh), date));
+      await saveWarehouseRows(date, whId, rowsToSend);
       await setSubmitted(date, whId, true);
       showToast(`${wh.name}: данные отправлены в транспортный отдел`);
     } catch {
@@ -1179,7 +1187,7 @@ export default function ShipmentApp() {
             dateLabel={fmtDateRu(date)}
             name="РЦ Ош"
             point={OSH_POINT}
-            warehouses={REGION_WHS}
+            warehouses={OSH_WHS}
             stores={OSH_STORES}
             transferPrefix="005"
             Icon={MapPin}
@@ -1232,7 +1240,7 @@ export default function ShipmentApp() {
           </div>
         ) : activeTab !== "otl" ? (
           <WarehousePanel
-            wh={WAREHOUSES.find((w) => w.id === activeTab)}
+            wh={mainWh(WAREHOUSES.find((w) => w.id === activeTab))}
             rows={day[`rows_${activeTab}`] || []}
             submitted={day[`submitted_${activeTab}`]}
             duplicateOrders={duplicateOrders}
@@ -1259,7 +1267,7 @@ export default function ShipmentApp() {
             yugDay={yDay}
             extraRegions={[
               { key: "bk", title: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange", day: bk.day, warehouses: REGION_WHS },
-              { key: "osh", title: "РЦ Ош", Icon: MapPin, accent: "emerald", day: osh.day, warehouses: REGION_WHS },
+              { key: "osh", title: "РЦ Ош", Icon: MapPin, accent: "emerald", day: osh.day, warehouses: OSH_WHS },
               { key: "sever", title: "Регионы", Icon: Compass, accent: "indigo", day: sever.day, warehouses: SEVER_STATUS_WHS },
             ]}
             yugDateLabel={fmtDateRu(yDate)}
