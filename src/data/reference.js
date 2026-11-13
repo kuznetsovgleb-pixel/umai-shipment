@@ -631,6 +631,11 @@ export const KARAKOL_WAREHOUSES = KARAKOL_WAREHOUSE_IDS.map((id) => WAREHOUSES.f
 // Список магазинов — как в «Холод Юг» (у Оша без самого «РЦ Ош»).
 // ---------------------------------------------------------------------------
 export const REGION_WAREHOUSE_IDS = ["prigorodnoe", "argo", "pto", "sagadalieva", "transit_yug"];
+// у РЦ Ош дополнительно есть Транзит Север (добавлен в конец — номера перемещений остальных складов не меняются)
+export const OSH_WAREHOUSE_IDS = [...REGION_WAREHOUSE_IDS, "transit_sever"];
+// автонумерация заказов на основных вкладках: код склада (3 цифры). КЦП и Сендвичи — в WAREHOUSES (601, 602).
+// На вкладках Каракол / Базар-Коргон / Ош / Холод Юг / Регионы номера по-прежнему вводятся вручную.
+export const MAIN_AUTO_ORDER_CODES = { hlebzavod: "603", kkcp: "604", transit_yug: "605", transit_sever: "606" };
 export const BAZAR_KORGON_POINT = "РЦ Базар-Коргон";
 export const OSH_POINT = "РЦ Ош";
 export const BAZAR_KORGON_STORES = HOLOD_YUG_STORES;
