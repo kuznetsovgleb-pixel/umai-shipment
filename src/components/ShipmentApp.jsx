@@ -4,7 +4,7 @@ import {
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
   Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
@@ -156,6 +156,9 @@ const GROUP_BY_WAREHOUSE = {
 // склад основной вкладки с учётом автонумерации заказов (КЦП/Сендвичи — в WAREHOUSES, остальные — по коду)
 const mainWh = (w) => (w && MAIN_AUTO_ORDER_CODES[w.id] ? { ...w, autoOrderCode: MAIN_AUTO_ORDER_CODES[w.id] } : w);
 
+// список складов направления с кодами автонумерации (dir — ключ в AUTO_ORDER_CODES)
+const withAuto = (list, dir) => list.map((w) => (AUTO_ORDER_CODES[dir][w.id] ? { ...w, autoOrderCode: AUTO_ORDER_CODES[dir][w.id] } : w));
+
 // ISO-дата + n дней
 const addDaysIso = (iso, n) => {
   const [y, m, d] = iso.split("-").map(Number);
@@ -288,18 +291,19 @@ const consolidateRows = (warehouses, dayData) => {
 
 // склады Холода Юга с той же формой, что и на основных вкладках
 const YUG_WH_IDS = ["sagadalieva_zamorozka", "hlebzavod", "kkcp"];
-const YUG_WHS = YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
-const REGION_WHS = REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
-const OSH_WHS = OSH_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id));
+const YUG_WHS = withAuto(YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "yug");
+const REGION_WHS = withAuto(REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "bazar_korgon");
+const OSH_WHS = withAuto(OSH_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "osh");
+const KARAKOL_WHS = withAuto(KARAKOL_WAREHOUSES, "karakol");
 // в «Регионах» у Хлебзавода категория выбирается по каждому заказу (Заморозка / Сухой),
 // и на один магазин можно несколько заказов — с разными категориями
 const SEVER_WH_OVERRIDES = {
   hlebzavod: { perOrderCategory: true, categories: ["Заморозка", "Сухой"], storeDupByCategory: true },
 };
-const SEVER_WHS = SEVER_WAREHOUSE_IDS.map((id) => {
+const SEVER_WHS = withAuto(SEVER_WAREHOUSE_IDS.map((id) => {
   const w = WAREHOUSES.find((x) => x.id === id);
   return SEVER_WH_OVERRIDES[id] ? { ...w, ...SEVER_WH_OVERRIDES[id] } : w;
-});
+}), "sever");
 const SEVER_ZH_FORMS = [
   { id: "zh_milk", name: "Жашылча · Молоко", accent: "cyan" },
   { id: "zh_sof", name: "Жашылча · СОФ", accent: "cyan" },
@@ -587,19 +591,25 @@ function useRegionDay({ date, store, warehouses, label, saveTimers, showToast })
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [date]
   );
-  const update = (whId, rowId, field, value) =>
-    patchRows(whId, (rows) => rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)));
+  const update = (whId, rowId, field, value) => {
+    const wh = warehouses.find((w) => w.id === whId);
+    patchRows(whId, (rows) =>
+      assignAutoOrders(rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)), wh, date)
+    );
+  };
   const add = (whId) => patchRows(whId, (rows) => [...rows, makeEmptyRow()]);
   const remove = (whId, rowId) =>
     patchRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
   const submit = async (whId) => {
     const wh = warehouses.find((w) => w.id === whId);
-    const err = submitCheck(wh, day[`rows_${whId}`] || [], duplicates);
+    const rowsToSend = assignAutoOrders(day[`rows_${whId}`] || [], wh, date);
+    const err = submitCheck(wh, rowsToSend, findDuplicateOrders(warehouses, { ...day, [`rows_${whId}`]: rowsToSend }));
     if (err) return showToast(err);
     try {
       // сначала гарантированно сохраняем строки, потом ставим «отправлено» —
       // иначе при сбое записи можно отправить пустой список
-      await store.saveRows(date, whId, day[`rows_${whId}`] || []);
+      patchRows(whId, (rows) => assignAutoOrders(rows, wh, date));
+      await store.saveRows(date, whId, rowsToSend);
       await store.setSubmitted(date, whId, true);
       showToast(`${label} · ${wh.name}: данные отправлены в транспортный отдел`);
     } catch {
@@ -703,7 +713,7 @@ export default function ShipmentApp() {
   };
 
   const duplicateOrders = useMemo(() => findDuplicateOrders(WAREHOUSES, day), [day]);
-  const karakolDuplicateOrders = useMemo(() => findDuplicateOrders(KARAKOL_WAREHOUSES, kDay), [kDay]);
+  const karakolDuplicateOrders = useMemo(() => findDuplicateOrders(KARAKOL_WHS, kDay), [kDay]);
 
   // ---- склад: строки заказов (debounce перед записью в Firestore) ----
   // отдельный таймер на каждую цель сохранения (по складу + отдельно для машин) —
@@ -856,17 +866,24 @@ export default function ShipmentApp() {
     },
     [date]
   );
-  const updateKarakolRow = (whId, rowId, field, value) =>
-    patchKarakolRows(whId, (rows) => rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)));
+  const updateKarakolRow = (whId, rowId, field, value) => {
+    const kwh = KARAKOL_WHS.find((w) => w.id === whId);
+    patchKarakolRows(whId, (rows) =>
+      assignAutoOrders(rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)), kwh, date)
+    );
+  };
   const addKarakolRow = (whId) => patchKarakolRows(whId, (rows) => [...rows, makeEmptyRow()]);
   const removeKarakolRow = (whId, rowId) =>
     patchKarakolRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
 
   const submitKarakol = async (whId) => {
     const wh = WAREHOUSES.find((w) => w.id === whId);
-    const err = submitCheck(wh, kDay[`rows_${whId}`] || [], karakolDuplicateOrders);
+    const rowsToSend = assignAutoOrders(kDay[`rows_${whId}`] || [], KARAKOL_WHS.find((w) => w.id === whId), date);
+    const err = submitCheck(wh, rowsToSend, findDuplicateOrders(KARAKOL_WHS, { ...kDay, [`rows_${whId}`]: rowsToSend }));
     if (err) return showToast(err);
     try {
+      patchKarakolRows(whId, (rows) => assignAutoOrders(rows, KARAKOL_WHS.find((w) => w.id === whId), date));
+      await saveKarakolRows(date, whId, rowsToSend);
       await setKarakolSubmitted(date, whId, true);
       showToast(`Каракол · ${wh.name}: данные отправлены в транспортный отдел`);
     } catch {
@@ -900,16 +917,23 @@ export default function ShipmentApp() {
   );
 
   // Садыгалиева (заморозка), Хлебзавод, ККЦП в Холод Юг — та же форма, что и на основных вкладках
-  const updateYugWh = (whId, rowId, field, value) =>
-    patchYugRows(whId, (rows) => rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)));
+  const updateYugWh = (whId, rowId, field, value) => {
+    const ywh = YUG_WHS.find((w) => w.id === whId);
+    patchYugRows(whId, (rows) =>
+      assignAutoOrders(rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)), ywh, yDate)
+    );
+  };
   const addYugWh = (whId) => patchYugRows(whId, (rows) => [...rows, makeEmptyRow()]);
   const removeYugWh = (whId, rowId) =>
     patchYugRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
   const submitYugWh = async (whId) => {
     const wh = YUG_WHS.find((w) => w.id === whId);
-    const err = submitCheck(wh, yDay[`rows_${whId}`] || [], yugDuplicates);
+    const rowsToSend = assignAutoOrders(yDay[`rows_${whId}`] || [], wh, yDate);
+    const err = submitCheck(wh, rowsToSend, findDuplicateOrders(YUG_WHS, { ...yDay, [`rows_${whId}`]: rowsToSend }));
     if (err) return showToast(err);
     try {
+      patchYugRows(whId, (rows) => assignAutoOrders(rows, wh, yDate));
+      await saveHolodYugRows(yDate, whId, rowsToSend);
       await setHolodYugSubmitted(yDate, whId, true);
       showToast(`Холод Юг · ${wh.name}: данные отправлены в транспортный отдел`);
     } catch {
@@ -1032,7 +1056,7 @@ export default function ShipmentApp() {
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
 
   const consolidated = useMemo(() => consolidateRows(WAREHOUSES, day), [day]);
-  const karakolConsolidated = useMemo(() => consolidateRows(KARAKOL_WAREHOUSES, kDay), [kDay]);
+  const karakolConsolidated = useMemo(() => consolidateRows(KARAKOL_WHS, kDay), [kDay]);
   const karakolTransfers = useMemo(() => buildKarakolTransfers(date, karakolConsolidated), [date, karakolConsolidated]);
   const yugDuplicates = useMemo(() => findDuplicateOrders(YUG_WHS, yDay), [yDay]);
   const yugConsolidated = useMemo(() => buildYugConsolidated(yDay), [yDay]);
@@ -1923,7 +1947,7 @@ function KarakolPanel({
   kDay, loading, sub, onSubChange, duplicateOrders,
   onUpdate, onAdd, onRemove, onSubmit, onUnlock,
   consolidated, transfers, onExport, dateLabel,
-  name = "Каракол", point = KARAKOL_POINT, warehouses = KARAKOL_WAREHOUSES, stores = KARAKOL_STORES,
+  name = "Каракол", point = KARAKOL_POINT, warehouses = KARAKOL_WHS, stores = KARAKOL_STORES,
   transferPrefix = "003", Icon = Mountain, tone = "fuchsia",
 }) {
   const wh = warehouses.find((w) => w.id === sub);
