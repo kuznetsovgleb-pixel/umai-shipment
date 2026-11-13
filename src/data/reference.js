@@ -635,7 +635,19 @@ export const REGION_WAREHOUSE_IDS = ["prigorodnoe", "argo", "pto", "sagadalieva"
 export const OSH_WAREHOUSE_IDS = [...REGION_WAREHOUSE_IDS, "transit_sever"];
 // автонумерация заказов на основных вкладках: код склада (3 цифры). КЦП и Сендвичи — в WAREHOUSES (601, 602).
 // На вкладках Каракол / Базар-Коргон / Ош / Холод Юг / Регионы номера по-прежнему вводятся вручную.
-export const MAIN_AUTO_ORDER_CODES = { hlebzavod: "603", kkcp: "604", transit_yug: "605", transit_sever: "606" };
+// Код склада = цифра направления + "0" + цифра склада (Хлебзавод 3, ККЦП 4, Транзит Юг 5, Транзит Север 6),
+// поэтому в разных направлениях номера не пересекаются:
+//   основные вкладки 6xx (КЦП 601, Сендвичи 602 — в WAREHOUSES), Холод Юг 7xx, Регионы 8xx,
+//   Каракол 9xx, Базар-Коргон 2xx, Ош 3xx.
+export const AUTO_ORDER_CODES = {
+  main: { hlebzavod: "603", kkcp: "604", transit_yug: "605", transit_sever: "606" },
+  yug: { hlebzavod: "703", kkcp: "704" },
+  sever: { hlebzavod: "803", kkcp: "804" },
+  karakol: { transit_sever: "906" },
+  bazar_korgon: { transit_yug: "205" },
+  osh: { transit_yug: "305", transit_sever: "306" },
+};
+export const MAIN_AUTO_ORDER_CODES = AUTO_ORDER_CODES.main;
 export const BAZAR_KORGON_POINT = "РЦ Базар-Коргон";
 export const OSH_POINT = "РЦ Ош";
 export const BAZAR_KORGON_STORES = HOLOD_YUG_STORES;
