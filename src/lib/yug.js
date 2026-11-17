@@ -29,24 +29,27 @@ const toISO = (dt) => {
   return `${dt.getFullYear()}-${m}-${d}`;
 };
 
-export const isShipDay = (iso) => YUG_SHIP_WEEKDAYS.includes(parseISO(iso).getDay());
+// БК и Ош: отгрузка по понедельникам, средам и пятницам
+export const BK_OSH_SHIP_WEEKDAYS = [1, 3, 5];
+
+export const isShipDay = (iso, weekdays = YUG_SHIP_WEEKDAYS) => weekdays.includes(parseISO(iso).getDay());
 
 // ближайший день отгрузки, не раньше указанной даты (сама дата — если она день отгрузки)
-export const nextShipDate = (iso) => {
+export const nextShipDate = (iso, weekdays = YUG_SHIP_WEEKDAYS) => {
   const dt = parseISO(iso);
   for (let i = 0; i < 8; i++) {
-    if (YUG_SHIP_WEEKDAYS.includes(dt.getDay())) return toISO(dt);
+    if (weekdays.includes(dt.getDay())) return toISO(dt);
     dt.setDate(dt.getDate() + 1);
   }
   return iso;
 };
 
 // шаг к следующему (dir = 1) или предыдущему (dir = -1) дню отгрузки
-export const stepShipDate = (iso, dir) => {
+export const stepShipDate = (iso, dir, weekdays = YUG_SHIP_WEEKDAYS) => {
   const dt = parseISO(iso);
   for (let i = 0; i < 8; i++) {
     dt.setDate(dt.getDate() + dir);
-    if (YUG_SHIP_WEEKDAYS.includes(dt.getDay())) return toISO(dt);
+    if (weekdays.includes(dt.getDay())) return toISO(dt);
   }
   return iso;
 };
@@ -65,6 +68,9 @@ export const yugPallets = (weightKg, volumeM3) => {
 
 const round3 = (x) => Math.round(x * 1000) / 1000;
 
+// коробки → паллеты: до 20 коробок — 0,5 паллеты, 21–40 — 1 паллета и так далее
+export const boxesToPallets = (boxes) => (boxes > 0 ? Math.ceil(boxes / 20) * 0.5 : 0);
+
 // заказы одного магазина схлопываются в один: вес и объём суммируются,
 // паллеты считаются по суммам, номером остаётся номер первого заказа
 export const collapseYugRows = (rows, weightOnly = false) => {
@@ -75,6 +81,7 @@ export const collapseYugRows = (rows, weightOnly = false) => {
     if (!order) return;
     const weight = parseFloat(r.weight) || 0;
     const volume = parseFloat(r.volume) || 0;
+    const boxes = parseInt(r.boxes, 10) || 0;
     const category = r.category || "";
     const storeName = (r.store || "").trim().toLowerCase();
     // заказы одного магазина объединяются; если у строк есть товарная группа
@@ -82,7 +89,7 @@ export const collapseYugRows = (rows, weightOnly = false) => {
     const storeKey = storeName ? `${storeName}|${category}` : "";
     let g = storeKey ? byStore.get(storeKey) : null;
     if (!g) {
-      g = { key: r.id, store: r.store || "", category, order, orders: [], count: 0, weight: 0, volume: 0, firstId: r.id };
+      g = { key: r.id, store: r.store || "", category, order, orders: [], count: 0, weight: 0, volume: 0, boxes: 0, firstId: r.id };
       groups.push(g);
       if (storeKey) byStore.set(storeKey, g);
     }
@@ -90,11 +97,21 @@ export const collapseYugRows = (rows, weightOnly = false) => {
     g.count += 1;
     g.weight += weight;
     g.volume += volume;
+    g.boxes += boxes;
   });
   groups.forEach((g) => {
     g.weight = round3(g.weight);
     g.volume = round3(g.volume);
-    g.pallets = yugPallets(g.weight, weightOnly ? 0 : g.volume);
+    const vol = weightOnly ? 0 : g.volume;
+    if (g.boxes > 0) {
+      // Транзит с коробками: паллеты по весу/объёму (если указаны) и по коробкам — берём большее;
+      // если вес не указан — считаем его по паллетам (как у Холод Юга, 500 кг на паллету)
+      const byWv = g.weight > 0 || vol > 0 ? yugPallets(g.weight, vol) : 0;
+      g.pallets = Math.max(byWv, boxesToPallets(g.boxes));
+      if (!(g.weight > 0)) g.weight = round3(g.pallets * YUG_PALLET_KG);
+    } else {
+      g.pallets = yugPallets(g.weight, vol);
+    }
   });
   return groups;
 };
