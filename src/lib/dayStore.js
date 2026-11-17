@@ -394,7 +394,7 @@ export const setSeverSubmitted = severStore.setSubmitted;
 export const HOLOD_YUG_KEYS = ["sagadalieva_zamorozka", "zhashylcha", "transit_yug", "hlebzavod", "kkcp"];
 
 export const makeEmptyYugRow = () => ({
-  id: uid(), order: "", store: "", rawStore: "", weight: "", volume: "", category: "",
+  id: uid(), order: "", store: "", rawStore: "", weight: "", volume: "", boxes: "", category: "",
 });
 
 // склады с обычной формой заказов (как на основных вкладках): Садыгалиева (заморозка), Хлебзавод, ККЦП
