@@ -1,6 +1,6 @@
 import { doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
 import { db } from "../firebase";
-import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, SEVER_WAREHOUSE_IDS } from "../data/reference";
+import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, TRANSIT_WAREHOUSE_IDS, SEVER_WAREHOUSE_IDS } from "../data/reference";
 
 const uid = () => Math.random().toString(36).slice(2, 10);
 
@@ -373,6 +373,19 @@ export const emptyOshDay = oshStore.empty;
 export const subscribeToOshDay = oshStore.subscribe;
 export const saveOshRows = oshStore.saveRows;
 export const setOshSubmitted = oshStore.setSubmitted;
+
+// вкладка «Транзиты»: Транзит Юг и Транзит Север → Базар-Коргон / Ош, отдельные коллекции
+const transitBkStore = makeRegionStore("shipments_transit_bk", TRANSIT_WAREHOUSE_IDS);
+export const emptyTransitBkDay = transitBkStore.empty;
+export const subscribeToTransitBkDay = transitBkStore.subscribe;
+export const saveTransitBkRows = transitBkStore.saveRows;
+export const setTransitBkSubmitted = transitBkStore.setSubmitted;
+
+const transitOshStore = makeRegionStore("shipments_transit_osh", TRANSIT_WAREHOUSE_IDS);
+export const emptyTransitOshDay = transitOshStore.empty;
+export const subscribeToTransitOshDay = transitOshStore.subscribe;
+export const saveTransitOshRows = transitOshStore.saveRows;
+export const setTransitOshSubmitted = transitOshStore.setSubmitted;
 
 // Север: 3 склада с обычной формой + РЦ Жашылча (Молоко и СОФ) со строками из файла 1С
 export const SEVER_ZH_KEYS = ["zh_milk", "zh_sof"];
