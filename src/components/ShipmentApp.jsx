@@ -4,7 +4,7 @@ import {
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
   Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, TRANSIT_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import {
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
@@ -12,9 +12,11 @@ import {
   emptyHolodYugDay, subscribeToHolodYugDay, saveHolodYugRows, setHolodYugSubmitted, makeEmptyYugRow,
   emptyBazarKorgonDay, subscribeToBazarKorgonDay, saveBazarKorgonRows, setBazarKorgonSubmitted,
   emptyOshDay, subscribeToOshDay, saveOshRows, setOshSubmitted,
+  emptyTransitBkDay, subscribeToTransitBkDay, saveTransitBkRows, setTransitBkSubmitted,
+  emptyTransitOshDay, subscribeToTransitOshDay, saveTransitOshRows, setTransitOshSubmitted,
   emptySeverDay, subscribeToSeverDay, saveSeverRows, setSeverSubmitted, SEVER_ZH_KEYS,
 } from "../lib/dayStore";
-import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook, buildBazarKorgonTransfers, buildOshTransfers, downloadBazarKorgonWorkbook, downloadOshWorkbook, downloadSeverWorkbook } from "../lib/exportExcel";
+import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook, buildBazarKorgonTransfers, buildOshTransfers, downloadBazarKorgonWorkbook, downloadOshWorkbook, buildTransitBkTransfers, buildTransitOshTransfers, downloadTransitBkWorkbook, downloadTransitOshWorkbook, downloadSeverWorkbook } from "../lib/exportExcel";
 import {
   YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort, BK_OSH_SHIP_WEEKDAYS, boxesToPallets as yugBoxesToPallets,
   collapseYugRows, parseYugFile, yugPallets,
@@ -129,7 +131,7 @@ const findDuplicateStores = (rows, byCategory = false) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "kcp", "sendvichi", "transit_yug", "transit_sever", "zhashylcha", "karakol", "bazar_korgon", "osh", "sever", "holod_yug", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "kcp", "sendvichi", "transit_yug", "transit_sever", "zhashylcha", "karakol", "bazar_korgon", "osh", "transit", "sever", "holod_yug", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -295,6 +297,8 @@ const YUG_WHS = withAuto(YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === 
 const REGION_WHS = withAuto(REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "bazar_korgon");
 const OSH_WHS = withAuto(OSH_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "osh");
 const KARAKOL_WHS = withAuto(KARAKOL_WAREHOUSES, "karakol");
+const TR_BK_WHS = withAuto(TRANSIT_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "transit_bk");
+const TR_OSH_WHS = withAuto(TRANSIT_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "transit_osh");
 // в «Регионах» у Хлебзавода категория выбирается по каждому заказу (Заморозка / Сухой),
 // и на один магазин можно несколько заказов — с разными категориями
 // в «Регионах» у Хлебзавода товарной категории нет (как на основной вкладке)
@@ -313,6 +317,7 @@ const SPECIAL_TABS = {
   karakol: { label: "Каракол", Icon: Mountain, accent: "fuchsia" },
   bazar_korgon: { label: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange" },
   osh: { label: "РЦ Ош", Icon: MapPin, accent: "emerald" },
+  transit: { label: "Транзиты", Icon: Send, accent: "teal" },
   sever: { label: "Регионы", Icon: Compass, accent: "indigo" },
   holod_yug: { label: "Холод Юг", Icon: Snowflake, accent: "sky" },
   otl: { label: "Для ОТЛ", Icon: Truck, accent: null },
@@ -623,6 +628,8 @@ function useRegionDay({ date, store, warehouses, label, saveTimers, showToast })
 }
 
 const BK_STORE = { empty: emptyBazarKorgonDay, subscribe: subscribeToBazarKorgonDay, saveRows: saveBazarKorgonRows, setSubmitted: setBazarKorgonSubmitted };
+const TR_BK_STORE = { empty: emptyTransitBkDay, subscribe: subscribeToTransitBkDay, saveRows: saveTransitBkRows, setSubmitted: setTransitBkSubmitted };
+const TR_OSH_STORE = { empty: emptyTransitOshDay, subscribe: subscribeToTransitOshDay, saveRows: saveTransitOshRows, setSubmitted: setTransitOshSubmitted };
 const OSH_STORE = { empty: emptyOshDay, subscribe: subscribeToOshDay, saveRows: saveOshRows, setSubmitted: setOshSubmitted };
 const SEVER_STORE = { empty: emptySeverDay, subscribe: subscribeToSeverDay, saveRows: saveSeverRows, setSubmitted: setSeverSubmitted };
 
@@ -732,6 +739,13 @@ export default function ShipmentApp() {
   };
   const bk = useRegionDay({ date: bkDate, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", saveTimers, showToast });
   const osh = useRegionDay({ date: oshDate, store: OSH_STORE, warehouses: OSH_WHS, label: "Ош", saveTimers, showToast });
+  const trBk = useRegionDay({ date, store: TR_BK_STORE, warehouses: TR_BK_WHS, label: "Транзиты → Базар-Коргон", saveTimers, showToast });
+  const trOsh = useRegionDay({ date, store: TR_OSH_STORE, warehouses: TR_OSH_WHS, label: "Транзиты → Ош", saveTimers, showToast });
+  const [trTo, setTrTo] = useState("bk");
+  const [trBkSub, setTrBkSub] = useState("transit_yug");
+  const [trOshSub, setTrOshSub] = useState("transit_yug");
+  const trBkTransfers = useMemo(() => buildTransitBkTransfers(date, trBk.consolidated), [date, trBk.consolidated]);
+  const trOshTransfers = useMemo(() => buildTransitOshTransfers(date, trOsh.consolidated), [date, trOsh.consolidated]);
   const sever = useRegionDay({ date, store: SEVER_STORE, warehouses: SEVER_WHS, label: "Регионы", saveTimers, showToast });
   const [severSub, setSeverSub] = useState("sagadalieva_zamorozka");
   const [bkSub, setBkSub] = useState("prigorodnoe");
@@ -1094,6 +1108,16 @@ export default function ShipmentApp() {
     downloadOshWorkbook(oshDate, osh.consolidated);
     showToast("Файл РЦ Ош сформирован и скачан");
   };
+  const exportTrBk = () => {
+    if (trBk.consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки транзитов");
+    downloadTransitBkWorkbook(date, trBk.consolidated);
+    showToast("Файл «Транзиты → Базар-Коргон» сформирован и скачан");
+  };
+  const exportTrOsh = () => {
+    if (trOsh.consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки транзитов");
+    downloadTransitOshWorkbook(date, trOsh.consolidated);
+    showToast("Файл «Транзиты → Ош» сформирован и скачан");
+  };
   const exportSever = () => {
     if (severConsolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов вкладки «Регионы»");
     downloadSeverWorkbook(date, severConsolidated);
@@ -1166,6 +1190,46 @@ export default function ShipmentApp() {
       <div className="max-w-6xl mx-auto px-6 py-6">
         {activeTab === "zhashylcha" ? (
           <ZhashylchaPanel date={date} />
+        ) : activeTab === "transit" ? (
+          <div className="space-y-5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold uppercase tracking-wide text-stone-500 mr-1">Куда:</span>
+              {[{ id: "bk", name: "РЦ Базар-Коргон", d: trBk.day }, { id: "osh", name: "РЦ Ош", d: trOsh.day }].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTrTo(t.id)}
+                  className={`flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-lg border transition-colors ${
+                    trTo === t.id ? "bg-teal-600 text-white border-teal-600" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
+                  }`}
+                >
+                  <MapPin size={14} /> {t.name}
+                </button>
+              ))}
+            </div>
+            {trTo === "bk" ? (
+              <KarakolPanel
+                kDay={trBk.day} loading={trBk.loading} sub={trBkSub} onSubChange={setTrBkSub}
+                duplicateOrders={trBk.duplicates}
+                onUpdate={trBk.update} onAdd={trBk.add} onRemove={trBk.remove} onSubmit={trBk.submit} onUnlock={trBk.unlock}
+                consolidated={trBk.consolidated} transfers={trBkTransfers} onExport={exportTrBk}
+                dateLabel={fmtDateRu(date)}
+                name="Транзиты → Базар-Коргон" point={BAZAR_KORGON_POINT}
+                warehouses={TR_BK_WHS} stores={BAZAR_KORGON_STORES}
+                transferPrefix="004" Icon={Send} tone="orange"
+              />
+            ) : (
+              <KarakolPanel
+                kDay={trOsh.day} loading={trOsh.loading} sub={trOshSub} onSubChange={setTrOshSub}
+                duplicateOrders={trOsh.duplicates}
+                onUpdate={trOsh.update} onAdd={trOsh.add} onRemove={trOsh.remove} onSubmit={trOsh.submit} onUnlock={trOsh.unlock}
+                consolidated={trOsh.consolidated} transfers={trOshTransfers} onExport={exportTrOsh}
+                dateLabel={fmtDateRu(date)}
+                name="Транзиты → Ош" point={OSH_POINT}
+                warehouses={TR_OSH_WHS} stores={OSH_STORES}
+                transferPrefix="005" Icon={Send} tone="emerald"
+              />
+            )}
+          </div>
         ) : activeTab === "sever" ? (
           <SeverPanel
             date={date}
@@ -1307,6 +1371,8 @@ export default function ShipmentApp() {
             extraRegions={[
               { key: "bk", title: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange", day: bk.day, warehouses: REGION_WHS },
               { key: "osh", title: "РЦ Ош", Icon: MapPin, accent: "emerald", day: osh.day, warehouses: OSH_WHS },
+              { key: "trbk", title: "Транзиты → Базар-Коргон", Icon: Send, accent: "teal", day: trBk.day, warehouses: TR_BK_WHS },
+              { key: "trosh", title: "Транзиты → Ош", Icon: Send, accent: "teal", day: trOsh.day, warehouses: TR_OSH_WHS },
               { key: "sever", title: "Регионы", Icon: Compass, accent: "indigo", day: sever.day, warehouses: SEVER_STATUS_WHS },
             ]}
             yugDateLabel={fmtDateRu(yDate)}
