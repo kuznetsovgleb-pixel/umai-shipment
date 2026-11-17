@@ -16,7 +16,7 @@ import {
 } from "../lib/dayStore";
 import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook, buildBazarKorgonTransfers, buildOshTransfers, downloadBazarKorgonWorkbook, downloadOshWorkbook, downloadSeverWorkbook } from "../lib/exportExcel";
 import {
-  YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort,
+  YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort, BK_OSH_SHIP_WEEKDAYS, boxesToPallets as yugBoxesToPallets,
   collapseYugRows, parseYugFile, yugPallets,
 } from "../lib/yug";
 
@@ -297,9 +297,8 @@ const OSH_WHS = withAuto(OSH_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.
 const KARAKOL_WHS = withAuto(KARAKOL_WAREHOUSES, "karakol");
 // в «Регионах» у Хлебзавода категория выбирается по каждому заказу (Заморозка / Сухой),
 // и на один магазин можно несколько заказов — с разными категориями
-const SEVER_WH_OVERRIDES = {
-  hlebzavod: { perOrderCategory: true, categories: ["Заморозка", "Сухой"], storeDupByCategory: true },
-};
+// в «Регионах» у Хлебзавода товарной категории нет (как на основной вкладке)
+const SEVER_WH_OVERRIDES = {};
 const SEVER_WHS = withAuto(SEVER_WAREHOUSE_IDS.map((id) => {
   const w = WAREHOUSES.find((x) => x.id === id);
   return SEVER_WH_OVERRIDES[id] ? { ...w, ...SEVER_WH_OVERRIDES[id] } : w;
@@ -329,14 +328,16 @@ const YUG_STATUS_WHS = [
   { id: "kkcp", name: "ККЦП", accent: "violet" },
 ];
 
-const yugHasData = (r) => Boolean(String(r.order || "").trim() || r.store || r.weight || r.volume);
+const yugHasData = (r) => Boolean(String(r.order || "").trim() || r.store || r.weight || r.volume || r.boxes);
 // needsCategory — для Транзит Юга: у каждого заказа выбирается товарная группа
-const yugIssues = (r, needsCategory = false, weightOnly = false) => {
+// allowBoxes — Транзит Юг: количество можно указать коробками вместо веса/объёма
+const yugIssues = (r, needsCategory = false, weightOnly = false, allowBoxes = false) => {
   const hasData = yugHasData(r) || Boolean(r.category);
   if (!hasData) return { hasData: false, missingOrder: false, missingStore: false, missingQty: false, missingCategory: false, incomplete: false };
   const missingOrder = !String(r.order || "").trim();
   const missingStore = !r.store;
-  const missingQty = weightOnly ? !(parseFloat(r.weight) > 0) : !(parseFloat(r.weight) > 0) && !(parseFloat(r.volume) > 0);
+  const hasBoxes = allowBoxes && parseInt(r.boxes, 10) > 0;
+  const missingQty = weightOnly ? !(parseFloat(r.weight) > 0) : !(parseFloat(r.weight) > 0) && !(parseFloat(r.volume) > 0) && !hasBoxes;
   const missingCategory = needsCategory && !r.category;
   return { hasData: true, missingOrder, missingStore, missingQty, missingCategory, incomplete: missingOrder || missingStore || missingQty || missingCategory };
 };
@@ -388,7 +389,7 @@ const buildYugConsolidated = (yDay) => {
       list.push({
         id: g.key, whId: "transit_yug", warehouse: YUG_TR_NAME, shipPoint: YUG_TR_SHIP_POINT, accent: "teal",
         order: g.order, store: g.store || "—",
-        pallets: g.pallets, rolls: null, euro: null, american: null, boxes: null,
+        pallets: g.pallets, rolls: null, euro: null, american: null, boxes: g.boxes > 0 ? g.boxes : null,
         weight: Math.round(g.weight * 100) / 100,
         total: g.pallets,
         unloadSec: PALLET_UNLOAD_SEC,
@@ -721,14 +722,22 @@ export default function ShipmentApp() {
   // сохранение другого места, и данные тихо теряются
   const saveTimers = useRef({});
   // РЦ Базар-Коргон, РЦ Ош, Север — свои коллекции, следуют календарю сверху
-  const bk = useRegionDay({ date, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", saveTimers, showToast });
-  const osh = useRegionDay({ date, store: OSH_STORE, warehouses: OSH_WHS, label: "Ош", saveTimers, showToast });
+  const [bkDate, setBkDate] = useState(() => nextShipDate(todayISO(), BK_OSH_SHIP_WEEKDAYS));
+  const [oshDate, setOshDate] = useState(() => nextShipDate(todayISO(), BK_OSH_SHIP_WEEKDAYS));
+  const changeBkOshDate = (setter) => (iso) => {
+    if (!iso) return;
+    const snapped = nextShipDate(iso, BK_OSH_SHIP_WEEKDAYS);
+    if (snapped !== iso) showToast(`Отгрузка бывает только по пн, ср и пт — выбрана ближайшая: ${fmtDateRu(snapped)}`);
+    setter(snapped);
+  };
+  const bk = useRegionDay({ date: bkDate, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", saveTimers, showToast });
+  const osh = useRegionDay({ date: oshDate, store: OSH_STORE, warehouses: OSH_WHS, label: "Ош", saveTimers, showToast });
   const sever = useRegionDay({ date, store: SEVER_STORE, warehouses: SEVER_WHS, label: "Регионы", saveTimers, showToast });
   const [severSub, setSeverSub] = useState("sagadalieva_zamorozka");
   const [bkSub, setBkSub] = useState("prigorodnoe");
   const [oshSub, setOshSub] = useState("prigorodnoe");
-  const bkTransfers = useMemo(() => buildBazarKorgonTransfers(date, bk.consolidated), [date, bk.consolidated]);
-  const oshTransfers = useMemo(() => buildOshTransfers(date, osh.consolidated), [date, osh.consolidated]);
+  const bkTransfers = useMemo(() => buildBazarKorgonTransfers(bkDate, bk.consolidated), [bkDate, bk.consolidated]);
+  const oshTransfers = useMemo(() => buildOshTransfers(oshDate, osh.consolidated), [oshDate, osh.consolidated]);
 
   // Север · РЦ Жашылча (Молоко и СОФ): строки из файла 1С + ручные правки, как у Жашылчи в Холод Юг
   const severZhUpdate = (key, rowId, field, value) =>
@@ -960,7 +969,7 @@ export default function ShipmentApp() {
     patchYugRows("transit_yug", (rows) =>
       rows.map((r) => {
         if (r.id !== rowId) return r;
-        const v = field === "weight" || field === "volume" ? sanitizeWeight(value) : value;
+        const v = field === "weight" || field === "volume" ? sanitizeWeight(value) : field === "boxes" ? sanitizeQty(value) : value;
         return { ...r, [field]: v };
       })
     );
@@ -968,9 +977,9 @@ export default function ShipmentApp() {
   const removeYugTr = (rowId) =>
     patchYugRows("transit_yug", (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
   const submitYugTr = async () => {
-    const rows = (yDay.rows_transit_yug || []).filter((r) => yugIssues(r, true).hasData);
+    const rows = (yDay.rows_transit_yug || []).filter((r) => yugIssues(r, true, false, true).hasData);
     if (rows.length === 0) return showToast("Нет заполненных строк для отправки");
-    const bad = rows.filter((r) => yugIssues(r, true).incomplete).length;
+    const bad = rows.filter((r) => yugIssues(r, true, false, true).incomplete).length;
     if (bad > 0) return showToast(bad === 1 ? "Одна строка заполнена не полностью — проверьте подсвеченные поля" : `${bad} строк заполнены не полностью — проверьте подсвеченные поля`);
     const seen = new Set();
     for (const r of rows) {
@@ -1077,12 +1086,12 @@ export default function ShipmentApp() {
 
   const exportBk = () => {
     if (bk.consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
-    downloadBazarKorgonWorkbook(date, bk.consolidated);
+    downloadBazarKorgonWorkbook(bkDate, bk.consolidated);
     showToast("Файл РЦ Базар-Коргон сформирован и скачан");
   };
   const exportOsh = () => {
     if (osh.consolidated.length === 0) return showToast("Нет данных для выгрузки — дождитесь отправки со складов");
-    downloadOshWorkbook(date, osh.consolidated);
+    downloadOshWorkbook(oshDate, osh.consolidated);
     showToast("Файл РЦ Ош сформирован и скачан");
   };
   const exportSever = () => {
@@ -1170,6 +1179,8 @@ export default function ShipmentApp() {
             zh={{ onUpdate: severZhUpdate, onAdd: severZhAdd, onRemove: severZhRemove, onSubmit: severZhSubmit, onUnlock: severZhUnlock, onFile: severZhFile }}
           />
         ) : activeTab === "bazar_korgon" ? (
+          <>
+          <ShipDateBar date={bkDate} onChange={changeBkOshDate(setBkDate)} tone="orange" title="РЦ Базар-Коргон" />
           <KarakolPanel
             kDay={bk.day}
             loading={bk.loading}
@@ -1184,7 +1195,7 @@ export default function ShipmentApp() {
             consolidated={bk.consolidated}
             transfers={bkTransfers}
             onExport={exportBk}
-            dateLabel={fmtDateRu(date)}
+            dateLabel={fmtDateRu(bkDate)}
             name="РЦ Базар-Коргон"
             point={BAZAR_KORGON_POINT}
             warehouses={REGION_WHS}
@@ -1193,7 +1204,10 @@ export default function ShipmentApp() {
             Icon={MapPin}
             tone="orange"
           />
+          </>
         ) : activeTab === "osh" ? (
+          <>
+          <ShipDateBar date={oshDate} onChange={changeBkOshDate(setOshDate)} tone="emerald" title="РЦ Ош" />
           <KarakolPanel
             kDay={osh.day}
             loading={osh.loading}
@@ -1208,7 +1222,7 @@ export default function ShipmentApp() {
             consolidated={osh.consolidated}
             transfers={oshTransfers}
             onExport={exportOsh}
-            dateLabel={fmtDateRu(date)}
+            dateLabel={fmtDateRu(oshDate)}
             name="РЦ Ош"
             point={OSH_POINT}
             warehouses={OSH_WHS}
@@ -1217,6 +1231,7 @@ export default function ShipmentApp() {
             Icon={MapPin}
             tone="emerald"
           />
+          </>
         ) : activeTab === "holod_yug" ? (
           <HolodYugPanel
             date={yDate}
@@ -2686,6 +2701,39 @@ function YugDateBar({ date, onChange }) {
   );
 }
 
+// Дата отгрузки для РЦ Базар-Коргон и РЦ Ош: по понедельникам, средам и пятницам
+const SHIP_BAR_TONES = {
+  orange: { border: "border-orange-200", text: "text-orange-700" },
+  emerald: { border: "border-emerald-200", text: "text-emerald-700" },
+};
+function ShipDateBar({ date, onChange, tone = "orange", title = "" }) {
+  const t = SHIP_BAR_TONES[tone] || SHIP_BAR_TONES.orange;
+  const step = (dir) => stepShipDate(date, dir, BK_OSH_SHIP_WEEKDAYS);
+  return (
+    <div className={`bg-white border ${t.border} rounded-xl px-4 py-3 flex items-center gap-3 flex-wrap mb-5`}>
+      <span className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${t.text}`}>
+        <MapPin size={13} /> {title} · дата отгрузки
+      </span>
+      <button onClick={() => onChange(step(-1))} className="p-1.5 rounded-md border border-stone-300 text-stone-600 hover:border-stone-500" title="Предыдущая отгрузка">
+        <ChevronLeft size={15} />
+      </button>
+      <label className="flex items-center gap-2 bg-stone-50 border border-stone-300 rounded-lg px-3 py-1.5">
+        <input type="date" value={date} onChange={(e) => onChange(e.target.value)} className="bg-transparent text-sm font-mono font-semibold text-stone-900 outline-none" />
+        <span className={`text-xs font-bold ${t.text}`}>{weekdayShort(date)}</span>
+      </label>
+      <button onClick={() => onChange(step(1))} className="p-1.5 rounded-md border border-stone-300 text-stone-600 hover:border-stone-500" title="Следующая отгрузка">
+        <ChevronRight size={15} />
+      </button>
+      <button onClick={() => onChange(nextShipDate(todayISO(), BK_OSH_SHIP_WEEKDAYS))} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900">
+        Ближайшая
+      </button>
+      <span className="text-xs text-stone-400">
+        Отгрузка по пн, ср и пт. Заявки вводят накануне и копят до дня отгрузки; новый пустой список открывается со следующей датой отгрузки.
+      </span>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Регионы (бывший «Север»): Садыгалиева (заморозка), ККЦП, Хлебзавод — обычные формы, своя коллекция,
 // любая дата (по календарю сверху); РЦ Жашылча (Молоко/СОФ) — отдельный блок со своей
@@ -3111,8 +3159,8 @@ function YugTransitPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove
           <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Холод Юг · {YUG_TR_NAME}
         </div>
         <p className="text-sm text-stone-500">
-          Заказ №, магазин, вес, объём и товарная группа на отгрузку {dateLabel}. Паллеты: до {500} кг и до {1} м³ — одна паллета,
-          больше по весу или объёму — несколько. Заказы одного магазина в одной группе объединяются в один (вес и объём суммируются). Точка отгрузки — {YUG_TR_SHIP_POINT}.
+          Заказ №, магазин, вес, объём (или коробки) и товарная группа на отгрузку {dateLabel}. Паллеты: до {500} кг и до {1} м³ — одна паллета,
+          больше по весу или объёму — несколько. Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 21–40 — 1 и так далее); если указаны и вес/объём, и коробки, берётся большее число паллет. Заказы одного магазина в одной группе объединяются в один (вес, объём и коробки суммируются). Точка отгрузки — {YUG_TR_SHIP_POINT}.
         </p>
       </div>
 
@@ -3136,6 +3184,7 @@ function YugTransitPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove
               <th className="text-left font-semibold px-4 py-3">Магазин</th>
               <th className="text-left font-semibold px-4 py-3 w-32">Вес, кг</th>
               <th className="text-left font-semibold px-4 py-3 w-32">Объём, м³</th>
+              <th className="text-left font-semibold px-4 py-3 w-28">Коробки</th>
               <th className="text-left font-semibold px-4 py-3 w-44">Товарная группа</th>
               <th className="text-right font-semibold px-4 py-3 w-24">Паллеты</th>
               <th className="px-4 py-3 w-10" />
@@ -3143,9 +3192,11 @@ function YugTransitPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove
           </thead>
           <tbody>
             {rows.map((r, i) => {
-              const issues = yugIssues(r, true);
+              const issues = yugIssues(r, true, false, true);
               const isDupe = String(r.order || "").trim() && dupOrders.has(r.order.trim().toLowerCase());
-              const rowPallets = parseFloat(r.weight) > 0 || parseFloat(r.volume) > 0 ? yugPallets(r.weight, r.volume) : null;
+              const rowBoxes = parseInt(r.boxes, 10) || 0;
+              const rowWv = parseFloat(r.weight) > 0 || parseFloat(r.volume) > 0 ? yugPallets(r.weight, r.volume) : 0;
+              const rowPallets = rowWv > 0 || rowBoxes > 0 ? Math.max(rowWv, yugBoxesToPallets(rowBoxes)) : null;
               return (
                 <tr key={r.id} className="border-t border-stone-100 align-top">
                   <td className="px-4 py-2 text-stone-400 font-mono text-xs pt-2.5">{i + 1}</td>
@@ -3178,7 +3229,15 @@ function YugTransitPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove
                       placeholder="0"
                       className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
                     />
-                    {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите вес или объём</div>}
+                    {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите вес, объём или коробки</div>}
+                  </td>
+                  <td className="px-4 py-2">
+                    <input
+                      type="text" inputMode="numeric" disabled={submitted} value={r.boxes || ""}
+                      onChange={(e) => onUpdate(r.id, "boxes", e.target.value)}
+                      placeholder="0"
+                      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+                    />
                   </td>
                   <td className="px-4 py-2">
                     <select
