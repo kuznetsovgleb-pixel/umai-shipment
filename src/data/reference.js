@@ -630,9 +630,13 @@ export const KARAKOL_WAREHOUSES = KARAKOL_WAREHOUSE_IDS.map((id) => WAREHOUSES.f
 // в выгрузке заказы магазинов + перемещения «РЦ склада → РЦ региона». Свои коллекции.
 // Список магазинов — как в «Холод Юг» (у Оша без самого «РЦ Ош»).
 // ---------------------------------------------------------------------------
-export const REGION_WAREHOUSE_IDS = ["prigorodnoe", "argo", "pto", "sagadalieva", "transit_yug"];
-// у РЦ Ош дополнительно есть Транзит Север (добавлен в конец — номера перемещений остальных складов не меняются)
-export const OSH_WAREHOUSE_IDS = [...REGION_WAREHOUSE_IDS, "transit_sever"];
+export const REGION_WAREHOUSE_IDS = ["prigorodnoe", "argo", "pto", "sagadalieva"];
+// РЦ Ош — те же 4 склада; Транзит Юг и Транзит Север вынесены на вкладку «Транзиты»
+export const OSH_WAREHOUSE_IDS = [...REGION_WAREHOUSE_IDS];
+// вкладка «Транзиты»: Транзит Юг и Транзит Север → РЦ Базар-Коргон и РЦ Ош (дата — по общему календарю)
+export const TRANSIT_WAREHOUSE_IDS = ["transit_yug", "transit_sever"];
+// порядок для номеров перемещений: Юг = 5, Север = 6 (как было раньше в БК/Ош)
+export const TRANSIT_TRANSFER_IDS = [...REGION_WAREHOUSE_IDS, ...TRANSIT_WAREHOUSE_IDS];
 // автонумерация заказов на основных вкладках: код склада (3 цифры). КЦП и Сендвичи — в WAREHOUSES (601, 602).
 // На вкладках Каракол / Базар-Коргон / Ош / Холод Юг / Регионы номера по-прежнему вводятся вручную.
 // Код склада = цифра направления + "0" + цифра склада (Хлебзавод 3, ККЦП 4, Транзит Юг 5, Транзит Север 6),
@@ -644,8 +648,10 @@ export const AUTO_ORDER_CODES = {
   yug: { hlebzavod: "703", kkcp: "704" },
   sever: { hlebzavod: "803", kkcp: "804" },
   karakol: { transit_sever: "906" },
-  bazar_korgon: { transit_yug: "205" },
-  osh: { transit_yug: "305", transit_sever: "306" },
+  bazar_korgon: {},
+  osh: {},
+  transit_bk: { transit_yug: "205", transit_sever: "206" },
+  transit_osh: { transit_yug: "305", transit_sever: "306" },
 };
 export const MAIN_AUTO_ORDER_CODES = AUTO_ORDER_CODES.main;
 export const BAZAR_KORGON_POINT = "РЦ Базар-Коргон";
