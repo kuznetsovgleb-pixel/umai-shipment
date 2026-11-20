@@ -734,7 +734,7 @@ export default function ShipmentApp() {
   const changeBkOshDate = (setter) => (iso) => {
     if (!iso) return;
     const snapped = nextShipDate(iso, BK_OSH_SHIP_WEEKDAYS);
-    if (snapped !== iso) showToast(`Отгрузка бывает только по пн, ср и пт — выбрана ближайшая: ${fmtDateRu(snapped)}`);
+    if (snapped !== iso) showToast(`Отгрузка бывает только по пн, ср, пт и сб — выбрана ближайшая: ${fmtDateRu(snapped)}`);
     setter(snapped);
   };
   const bk = useRegionDay({ date: bkDate, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", saveTimers, showToast });
@@ -2794,7 +2794,7 @@ function ShipDateBar({ date, onChange, tone = "orange", title = "" }) {
         Ближайшая
       </button>
       <span className="text-xs text-stone-400">
-        Отгрузка по пн, ср и пт. Заявки вводят накануне и копят до дня отгрузки; новый пустой список открывается со следующей датой отгрузки.
+        Отгрузка по пн, ср, пт и сб. Заявки вводят накануне и копят до дня отгрузки; новый пустой список открывается со следующей датой отгрузки.
       </span>
     </div>
   );
