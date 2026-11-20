@@ -29,8 +29,8 @@ const toISO = (dt) => {
   return `${dt.getFullYear()}-${m}-${d}`;
 };
 
-// БК и Ош: отгрузка по понедельникам, средам и пятницам
-export const BK_OSH_SHIP_WEEKDAYS = [1, 3, 5];
+// БК и Ош: отгрузка по понедельникам, средам, пятницам и субботам
+export const BK_OSH_SHIP_WEEKDAYS = [1, 3, 5, 6];
 
 export const isShipDay = (iso, weekdays = YUG_SHIP_WEEKDAYS) => weekdays.includes(parseISO(iso).getDay());
 
