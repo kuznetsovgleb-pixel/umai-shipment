@@ -1442,7 +1442,7 @@ export default function ShipmentApp() {
             onSubmit={() => submitWarehouse(activeTab)}
             onUnlock={() => unlockWarehouse(activeTab)}
             dateLabel={fmtDateRu(whShipDate(WAREHOUSES.find((w) => w.id === activeTab), date))}
-            stores={activeTab === "hlebzavod" ? STORES_HLEBZAVOD : activeTab === "kkcp" ? STORES_NO_SEVER : YUG_WAREHOUSE_IDS.includes(activeTab) ? STORES_NO_YUG : STORES_NO_KARAKOL}
+            stores={activeTab === "hlebzavod" ? STORES_HLEBZAVOD : ["kkcp", "kcp", "sendvichi"].includes(activeTab) ? STORES_NO_SEVER : YUG_WAREHOUSE_IDS.includes(activeTab) ? STORES_NO_YUG : STORES_NO_KARAKOL}
           />
         ) : (
           <OtlPanel
