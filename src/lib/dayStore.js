@@ -474,3 +474,29 @@ export async function setHolodYugSubmitted(date, key, value) {
     throw err;
   }
 }
+
+
+// ---------------------------------------------------------------------------
+// Разрешения ОТЛ на подачу после срока (23:30 накануне).
+// Один служебный документ shipments/_unlocks; ключ: «<вкладка>__<дата>__<склад>» → true.
+// Лежит в уже открытой коллекции shipments, новые правила Firestore не нужны.
+// ---------------------------------------------------------------------------
+const unlocksRef = () => doc(db, "shipments", "_unlocks");
+export const unlockKey = (scope, date, whId) => `${scope}__${date}__${whId}`.replace(/\./g, "_");
+
+export function subscribeToUnlocks(onChange, onError) {
+  return onSnapshot(
+    unlocksRef(),
+    (snap) => onChange(snap.exists() ? snap.data() : {}),
+    (err) => onError && onError(err)
+  );
+}
+
+export async function setUnlockFlag(key, value) {
+  try {
+    await setDoc(unlocksRef(), { [key]: value }, { merge: true });
+  } catch (err) {
+    console.error("[dayStore] setUnlockFlag failed", { key, value }, err);
+    throw err;
+  }
+}
