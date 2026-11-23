@@ -1,11 +1,11 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef, createContext, useContext } from "react";
 import {
   Plus, Trash2, Send, Download, Truck, CheckCircle2, Circle, AlertTriangle,
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
   Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass,
 } from "lucide-react";
 import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, TRANSIT_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
-import {
+import { subscribeToUnlocks, setUnlockFlag, unlockKey,
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
   emptyKarakolDay, subscribeToKarakolDay, saveKarakolRows, setKarakolSubmitted,
@@ -57,11 +57,28 @@ const bishkekNow = () => {
 const isPastDeadline = (dateIso, now) => dateIso < now.iso || (dateIso === now.iso && now.hour * 60 + now.minute >= SUBMIT_DEADLINE_MIN);
 // Блокировка по сроку подачи: у складов, подающих накануне, лист на дату отгрузки S закрывается после 23:30 дня S−1.
 // У КЦП и Сендвичей на вкладке выбрана дата подачи (S−1), поэтому срок считается от неё самой.
-const isSubmitBlocked = (w, dateIso, submitted, now) => {
-  if (!w || submitted || !(w.shipNextDay || w.submitDayBefore)) return false;
-  const deadlineDay = w.shipNextDay ? dateIso : addDaysIso(dateIso, -1);
-  return isPastDeadline(deadlineDay, now);
-};
+// Все склады, кроме Жашылчи, подают накануне: лист на дату отгрузки D закрывается после 23:30 дня D−1 (и для прошлых дат).
+const isDateClosed = (dateIso, now) => Boolean(dateIso) && isPastDeadline(addDaysIso(dateIso, -1), now);
+const isSubmitBlocked = (w, dateIso, submitted, now) => !!w && !submitted && isDateClosed(dateIso, now);
+// Разрешения ОТЛ на подачу после срока: { "<вкладка>__<дата>__<склад>": true }
+const UnlockCtx = createContext({ unlocks: {}, requestUnlock: () => {} });
+const OTL_UNLOCK_CODE = "OTL-2026"; // код ОТЛ для снятия блокировки — при необходимости поменять здесь
+function useSheetBlocked(scope, date, whId, submitted) {
+  const now = useBishkekNow();
+  const { unlocks, requestUnlock } = useContext(UnlockCtx);
+  const key = unlockKey(scope, date, whId);
+  const closed = isDateClosed(date, now);
+  const unlocked = Boolean(unlocks[key]);
+  return { blocked: !submitted && closed && !unlocked, reopened: !submitted && closed && unlocked, request: () => requestUnlock(key) };
+}
+function useBishkekNow() {
+  const [now, setNow] = useState(bishkekNow);
+  useEffect(() => {
+    const t = setInterval(() => setNow(bishkekNow()), 30000);
+    return () => clearInterval(t);
+  }, []);
+  return now;
+}
 
 const fmtDateRu = (iso) => {
   if (!iso) return "";
@@ -601,7 +618,7 @@ function StoreSelect({ value, onChange, disabled, hasError, stores = STORES_NO_K
 
 // Региональная вкладка с обычными формами складов (Базар-Коргон, Ош, Север):
 // подписка на дату, правка строк (debounce), проверки и отправка, консолидация
-function useRegionDay({ date, store, warehouses, label, saveTimers, showToast }) {
+function useRegionDay({ date, store, warehouses, label, scope, unlocks = {}, saveTimers, showToast }) {
   const [day, setDay] = useState(store.empty());
   const [loading, setLoading] = useState(true);
 
@@ -649,6 +666,9 @@ function useRegionDay({ date, store, warehouses, label, saveTimers, showToast })
     patchRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
   const submit = async (whId) => {
     const wh = warehouses.find((w) => w.id === whId);
+    if (!day[`submitted_${whId}`] && isDateClosed(date, bishkekNow()) && !unlocks[unlockKey(scope, date, whId)]) {
+      return showToast("Заблокировано: данные не поданы вовремя (срок — накануне до 23:30)");
+    }
     const rowsToSend = assignAutoOrders(day[`rows_${whId}`] || [], wh, date);
     const err = submitCheck(wh, rowsToSend, findDuplicateOrders(warehouses, { ...day, [`rows_${whId}`]: rowsToSend }));
     if (err) return showToast(err);
@@ -681,6 +701,8 @@ export default function ShipmentApp() {
     const t = setInterval(() => setNowBk(bishkekNow()), 30000);
     return () => clearInterval(t);
   }, []);
+  const [unlocks, setUnlocks] = useState({});
+  useEffect(() => subscribeToUnlocks(setUnlocks, () => {}), []);
   const [day, setDay] = useState(emptyDay());
   const [loadingDay, setLoadingDay] = useState(true);
   const [toast, setToast] = useState(null);
@@ -766,6 +788,13 @@ export default function ShipmentApp() {
     setTimeout(() => setToast(null), 2800);
   };
 
+  const requestUnlock = (key) => {
+    const code = window.prompt("Разрешить подачу после срока. Введите код ОТЛ:");
+    if (code === null) return;
+    if (code.trim() !== OTL_UNLOCK_CODE) return showToast("Неверный код ОТЛ");
+    setUnlockFlag(key, true).then(() => showToast("Подача открыта ОТЛ")).catch(() => showToast("Не удалось открыть — проверьте связь"));
+  };
+
   const duplicateOrders = useMemo(() => findDuplicateOrders(WAREHOUSES, day), [day]);
   const karakolDuplicateOrders = useMemo(() => findDuplicateOrders(KARAKOL_WHS, kDay), [kDay]);
 
@@ -783,16 +812,16 @@ export default function ShipmentApp() {
     if (snapped !== iso) showToast(`Отгрузка бывает только по пн, ср, пт и сб — выбрана ближайшая: ${fmtDateRu(snapped)}`);
     setter(snapped);
   };
-  const bk = useRegionDay({ date: bkDate, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", saveTimers, showToast });
-  const osh = useRegionDay({ date: oshDate, store: OSH_STORE, warehouses: OSH_WHS, label: "Ош", saveTimers, showToast });
-  const trBk = useRegionDay({ date, store: TR_BK_STORE, warehouses: TR_BK_WHS, label: "Транзиты → Базар-Коргон", saveTimers, showToast });
-  const trOsh = useRegionDay({ date, store: TR_OSH_STORE, warehouses: TR_OSH_WHS, label: "Транзиты → Ош", saveTimers, showToast });
+  const bk = useRegionDay({ date: bkDate, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", scope: "РЦ Базар-Коргон", unlocks, saveTimers, showToast });
+  const osh = useRegionDay({ date: oshDate, store: OSH_STORE, warehouses: OSH_WHS, label: "Ош", scope: "РЦ Ош", unlocks, saveTimers, showToast });
+  const trBk = useRegionDay({ date, store: TR_BK_STORE, warehouses: TR_BK_WHS, label: "Транзиты → Базар-Коргон", scope: "Транзиты → Базар-Коргон", unlocks, saveTimers, showToast });
+  const trOsh = useRegionDay({ date, store: TR_OSH_STORE, warehouses: TR_OSH_WHS, label: "Транзиты → Ош", scope: "Транзиты → Ош", unlocks, saveTimers, showToast });
   const [trTo, setTrTo] = useState("bk");
   const [trBkSub, setTrBkSub] = useState("transit_yug");
   const [trOshSub, setTrOshSub] = useState("transit_yug");
   const trBkTransfers = useMemo(() => buildTransitBkTransfers(date, trBk.consolidated), [date, trBk.consolidated]);
   const trOshTransfers = useMemo(() => buildTransitOshTransfers(date, trOsh.consolidated), [date, trOsh.consolidated]);
-  const sever = useRegionDay({ date, store: SEVER_STORE, warehouses: SEVER_WHS, label: "Регионы", saveTimers, showToast });
+  const sever = useRegionDay({ date, store: SEVER_STORE, warehouses: SEVER_WHS, label: "Регионы", scope: "Регионы", unlocks, saveTimers, showToast });
   const [severSub, setSeverSub] = useState("sagadalieva_zamorozka");
   const [bkSub, setBkSub] = useState("prigorodnoe");
   const [oshSub, setOshSub] = useState("prigorodnoe");
@@ -904,7 +933,7 @@ export default function ShipmentApp() {
 
   const submitWarehouse = async (whId) => {
     const wh = WAREHOUSES.find((w) => w.id === whId);
-    if (isSubmitBlocked(wh, date, day[`submitted_${whId}`], bishkekNow())) {
+    if (isSubmitBlocked(wh, date, day[`submitted_${whId}`], bishkekNow()) && !unlocks[unlockKey("Склад", date, whId)]) {
       return showToast("Заблокировано: данные не поданы вовремя (срок — накануне до 23:30)");
     }
     // строки с данными, но без номера (если такие остались) получают автономер перед отправкой
@@ -1190,6 +1219,7 @@ export default function ShipmentApp() {
   const tabLabel = (id) => (id === "otl" ? "Для ОТЛ" : WAREHOUSES.find((w) => w.id === id)?.name);
 
   return (
+    <UnlockCtx.Provider value={{ unlocks, requestUnlock }}>
     <div className="min-h-screen bg-stone-50 text-stone-900 font-sans">
       <div className="border-b border-stone-200 bg-white">
         <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
@@ -1269,7 +1299,7 @@ export default function ShipmentApp() {
                 duplicateOrders={trBk.duplicates}
                 onUpdate={trBk.update} onAdd={trBk.add} onRemove={trBk.remove} onSubmit={trBk.submit} onUnlock={trBk.unlock}
                 consolidated={trBk.consolidated} transfers={trBkTransfers} onExport={exportTrBk}
-                dateLabel={fmtDateRu(date)}
+                date={date} dateLabel={fmtDateRu(date)}
                 name="Транзиты → Базар-Коргон" point={BAZAR_KORGON_POINT}
                 warehouses={TR_BK_WHS} stores={BAZAR_KORGON_STORES}
                 transferPrefix="004" Icon={Send} tone="orange"
@@ -1280,7 +1310,7 @@ export default function ShipmentApp() {
                 duplicateOrders={trOsh.duplicates}
                 onUpdate={trOsh.update} onAdd={trOsh.add} onRemove={trOsh.remove} onSubmit={trOsh.submit} onUnlock={trOsh.unlock}
                 consolidated={trOsh.consolidated} transfers={trOshTransfers} onExport={exportTrOsh}
-                dateLabel={fmtDateRu(date)}
+                date={date} dateLabel={fmtDateRu(date)}
                 name="Транзиты → Ош" point={OSH_POINT}
                 warehouses={TR_OSH_WHS} stores={OSH_STORES}
                 transferPrefix="005" Icon={Send} tone="emerald"
@@ -1316,7 +1346,7 @@ export default function ShipmentApp() {
             consolidated={bk.consolidated}
             transfers={bkTransfers}
             onExport={exportBk}
-            dateLabel={fmtDateRu(bkDate)}
+            date={bkDate} dateLabel={fmtDateRu(bkDate)}
             name="РЦ Базар-Коргон"
             point={BAZAR_KORGON_POINT}
             warehouses={REGION_WHS}
@@ -1343,7 +1373,7 @@ export default function ShipmentApp() {
             consolidated={osh.consolidated}
             transfers={oshTransfers}
             onExport={exportOsh}
-            dateLabel={fmtDateRu(oshDate)}
+            date={oshDate} dateLabel={fmtDateRu(oshDate)}
             name="РЦ Ош"
             point={OSH_POINT}
             warehouses={OSH_WHS}
@@ -1392,7 +1422,7 @@ export default function ShipmentApp() {
             consolidated={karakolConsolidated}
             transfers={karakolTransfers}
             onExport={exportKarakol}
-            dateLabel={fmtDateRu(date)}
+            date={date} dateLabel={fmtDateRu(date)}
           />
         ) : loadingDay ? (
           <div className="flex items-center justify-center gap-2 text-sm text-stone-400 py-24">
@@ -1403,7 +1433,7 @@ export default function ShipmentApp() {
             wh={mainWh(WAREHOUSES.find((w) => w.id === activeTab))}
             rows={day[`rows_${activeTab}`] || []}
             submitted={day[`submitted_${activeTab}`]}
-            blocked={isSubmitBlocked(WAREHOUSES.find((w) => w.id === activeTab), date, day[`submitted_${activeTab}`], nowBk)}
+            date={date}
             duplicateOrders={duplicateOrders}
             onUpdate={(rowId, field, value) => updateRow(activeTab, rowId, field, value)}
             onPasteQty={(rowId, field, raw) => pasteQty(activeTab, rowId, field, raw)}
@@ -1444,6 +1474,7 @@ export default function ShipmentApp() {
         </div>
       )}
     </div>
+    </UnlockCtx.Provider>
   );
 }
 
@@ -1451,9 +1482,10 @@ export default function ShipmentApp() {
 // Вкладка склада
 // ---------------------------------------------------------------------------
 
-function WarehousePanel({ wh, rows, submitted: submittedProp, blocked = false, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад", stores }) {
+function WarehousePanel({ wh, rows, submitted: submittedProp, date, scope, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад", stores }) {
   const a = ACCENT[wh.accent];
   // blocked — срок подачи прошёл (лист закрыт для ввода, снять блокировку нельзя)
+  const { blocked, reopened, request: requestUnlock } = useSheetBlocked(scope || prefix, date, wh.id, submittedProp);
   const submitted = submittedProp || blocked;
   const requiresWeight = Boolean(wh.requiresWeight);
   const requiresCategory = Boolean(wh.perOrderCategory);
@@ -1486,6 +1518,12 @@ function WarehousePanel({ wh, rows, submitted: submittedProp, blocked = false, d
       {blocked && (
         <div className="mb-4 flex items-center gap-2 bg-rose-50 border border-rose-300 text-rose-800 rounded-lg px-4 py-3 text-sm font-semibold">
           <Lock size={15} /> Заблокировано (данные не поданы вовремя). Подача на {dateLabel} закрывалась накануне в {SUBMIT_DEADLINE_LABEL}.
+          <button onClick={requestUnlock} className="ml-auto text-xs font-semibold underline underline-offset-2 whitespace-nowrap">Разрешить подачу (ОТЛ)</button>
+        </div>
+      )}
+      {reopened && (
+        <div className="mb-4 flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-3 text-sm">
+          <Lock size={15} /> Подача на {dateLabel} открыта ОТЛ по запросу — отправьте данные в транспортный отдел.
         </div>
       )}
       {submittedProp && (
@@ -2092,7 +2130,7 @@ function OtlPanel({
 function KarakolPanel({
   kDay, loading, sub, onSubChange, duplicateOrders,
   onUpdate, onAdd, onRemove, onSubmit, onUnlock,
-  consolidated, transfers, onExport, dateLabel,
+  consolidated, transfers, onExport, dateLabel, date,
   name = "Каракол", point = KARAKOL_POINT, warehouses = KARAKOL_WHS, stores = KARAKOL_STORES,
   transferPrefix = "003", Icon = Mountain, tone = "fuchsia",
 }) {
@@ -2164,6 +2202,7 @@ function KarakolPanel({
           stores={stores}
           rows={kDay[`rows_${sub}`] || []}
           submitted={kDay[`submitted_${sub}`]}
+          date={date}
           duplicateOrders={duplicateOrders}
           onUpdate={(rowId, field, value) => onUpdate(sub, rowId, field, value)}
           onPasteQty={(rowId, field, raw) => onUpdate(sub, rowId, field, sanitizeQty(raw))}
@@ -2951,6 +2990,7 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
           prefix="Регионы"
           rows={sDay[`rows_${whId}`] || []}
           submitted={sDay[`submitted_${whId}`]}
+          date={date}
           duplicateOrders={whp.duplicates}
           onUpdate={(rowId, field, value) => whp.update(whId, rowId, field, value)}
           onPasteQty={(rowId, field, raw) => whp.update(whId, rowId, field, sanitizeQty(raw))}
@@ -3027,6 +3067,7 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, wh
         <YugTransitPanel
           rows={yDay.rows_transit_yug || []}
           submitted={yDay.submitted_transit_yug}
+          date={date}
           dateLabel={dateLabel}
           {...tr}
         />
@@ -3037,6 +3078,7 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, wh
           prefix="Холод Юг"
           rows={yDay[`rows_${whId}`] || []}
           submitted={yDay[`submitted_${whId}`]}
+          date={date}
           duplicateOrders={whp.duplicateOrders}
           onUpdate={(rowId, field, value) => whp.onUpdate(whId, rowId, field, value)}
           onPasteQty={(rowId, field, raw) => whp.onUpdate(whId, rowId, field, sanitizeQty(raw))}
@@ -3265,8 +3307,10 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
 // больше по весу или объёму — несколько. Заказы одного магазина и одной группы объединяются.
 // ---------------------------------------------------------------------------
 
-function YugTransitPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove, onSubmit, onUnlock }) {
+function YugTransitPanel({ rows, submitted: submittedProp, date, dateLabel, onUpdate, onAdd, onRemove, onSubmit, onUnlock }) {
   const a = ACCENT.teal;
+  const { blocked, reopened, request: requestUnlock } = useSheetBlocked("Холод Юг", date, "transit_yug", submittedProp);
+  const submitted = submittedProp || blocked;
 
   const dupOrders = useMemo(() => {
     const counts = {};
@@ -3295,7 +3339,18 @@ function YugTransitPanel({ rows, submitted, dateLabel, onUpdate, onAdd, onRemove
         </p>
       </div>
 
-      {submitted && (
+      {blocked && (
+        <div className="flex items-center gap-2 bg-rose-50 border border-rose-300 text-rose-800 rounded-lg px-4 py-3 text-sm font-semibold">
+          <Lock size={15} /> Заблокировано (данные не поданы вовремя). Подача на {dateLabel} закрывалась накануне в {SUBMIT_DEADLINE_LABEL}.
+          <button onClick={requestUnlock} className="ml-auto text-xs font-semibold underline underline-offset-2 whitespace-nowrap">Разрешить подачу (ОТЛ)</button>
+        </div>
+      )}
+      {reopened && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-3 text-sm">
+          <Lock size={15} /> Подача на {dateLabel} открыта ОТЛ по запросу — отправьте данные в транспортный отдел.
+        </div>
+      )}
+      {submittedProp && (
         <div className="flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-stone-700">
             <Lock size={15} className="text-stone-500" /> Данные на {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
