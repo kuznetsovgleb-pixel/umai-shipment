@@ -302,7 +302,8 @@ const TR_OSH_WHS = withAuto(TRANSIT_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w
 // в «Регионах» у Хлебзавода категория выбирается по каждому заказу (Заморозка / Сухой),
 // и на один магазин можно несколько заказов — с разными категориями
 // в «Регионах» у Хлебзавода товарной категории нет (как на основной вкладке)
-const SEVER_WH_OVERRIDES = {};
+// КЦП в «Регионах» подаётся на выбранную дату (без сдвига «сегодня на завтра», как на основной вкладке)
+const SEVER_WH_OVERRIDES = { kcp: { shipNextDay: false } };
 const SEVER_WHS = withAuto(SEVER_WAREHOUSE_IDS.map((id) => {
   const w = WAREHOUSES.find((x) => x.id === id);
   return SEVER_WH_OVERRIDES[id] ? { ...w, ...SEVER_WH_OVERRIDES[id] } : w;
