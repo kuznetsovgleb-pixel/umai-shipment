@@ -43,6 +43,26 @@ const todayISO = () => {
   return `${d.getFullYear()}-${m}-${day}`;
 };
 
+// Срок подачи для складов «сегодня на завтра» (КЦП, Сендвичи): до 23:30 по Бишкеку.
+// После срока лист за эту дату блокируется, если данные не отправлены; за прошедшие даты — тоже.
+const SUBMIT_DEADLINE_MIN = 23 * 60 + 30; // 23:30
+const SUBMIT_DEADLINE_LABEL = "23:30";
+const bishkekNow = () => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Bishkek", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(new Date());
+  const get = (t) => parts.find((p) => p.type === t).value;
+  return { iso: `${get("year")}-${get("month")}-${get("day")}`, hour: parseInt(get("hour"), 10), minute: parseInt(get("minute"), 10) };
+};
+const isPastDeadline = (dateIso, now) => dateIso < now.iso || (dateIso === now.iso && now.hour * 60 + now.minute >= SUBMIT_DEADLINE_MIN);
+// Блокировка по сроку подачи: у складов, подающих накануне, лист на дату отгрузки S закрывается после 23:30 дня S−1.
+// У КЦП и Сендвичей на вкладке выбрана дата подачи (S−1), поэтому срок считается от неё самой.
+const isSubmitBlocked = (w, dateIso, submitted, now) => {
+  if (!w || submitted || !(w.shipNextDay || w.submitDayBefore)) return false;
+  const deadlineDay = w.shipNextDay ? dateIso : addDaysIso(dateIso, -1);
+  return isPastDeadline(deadlineDay, now);
+};
+
 const fmtDateRu = (iso) => {
   if (!iso) return "";
   const [y, m, d] = iso.split("-");
@@ -171,13 +191,33 @@ const addDaysIso = (iso, n) => {
 const whShipDate = (wh, dateIso) => (wh && wh.shipNextDay ? addDaysIso(dateIso, 1) : dateIso);
 
 // автономер заказа: ддммгг (дата отгрузки) + трёхзначный код склада + порядковый номер (2 цифры)
+// РАЗОВО (ноябрь 2026): КЦП и Сендвичи — заказы с номерами на 25.11 уже загружены в TMS (прежний сдвиг даты +1 день),
+// поэтому для листа на отгрузку 25.11 номер строится от даты 23.11 (231126…), чтобы не было дублей.
+// С листов на 26.11 и далее — обычная логика (дата отгрузки). После 25.11.2026 эту таблицу можно удалить.
+const ORDER_PREFIX_DATE_ONCE = {
+  kcp: { "2026-11-25": "2026-11-23" },
+  sendvichi: { "2026-11-25": "2026-11-23" },
+};
 const autoOrderPrefix = (wh, dateIso) => {
-  const [y, m, d] = whShipDate(wh, dateIso).split("-");
+  const shipIso = whShipDate(wh, dateIso);
+  const prefixIso = (ORDER_PREFIX_DATE_ONCE[wh.id] || {})[shipIso] || shipIso;
+  const [y, m, d] = prefixIso.split("-");
   return `${d}${m}${y.slice(2)}${wh.autoOrderCode}`;
 };
 // проставляет номера строкам с данными, у которых номера ещё нет; уже выданные номера не меняются
-const assignAutoOrders = (rows, wh, dateIso) => {
-  if (!wh || !wh.autoOrderCode) return rows;
+// номер вида «дата + код склада + №» с неверной датой (например, от прежнего сдвига +1 день) приводится к дате листа,
+// порядковый номер сохраняется
+const fixAutoOrder = (order, wh, dateIso) => {
+  if (!wh || !wh.autoOrderCode) return order;
+  const o = String(order || "").trim();
+  const m = o.match(new RegExp(`^\\d{6}${wh.autoOrderCode}(\\d+)$`));
+  if (!m) return order;
+  const prefix = autoOrderPrefix(wh, dateIso);
+  return o.startsWith(prefix) ? order : `${prefix}${m[1]}`;
+};
+const assignAutoOrders = (rowsIn, wh, dateIso) => {
+  if (!wh || !wh.autoOrderCode) return rowsIn;
+  const rows = rowsIn.map((r) => (r.order ? { ...r, order: fixAutoOrder(r.order, wh, dateIso) } : r));
   const prefix = autoOrderPrefix(wh, dateIso);
   let seq = 0;
   rows.forEach((r) => {
@@ -636,6 +676,11 @@ const SEVER_STORE = { empty: emptySeverDay, subscribe: subscribeToSeverDay, save
 
 export default function ShipmentApp() {
   const [date, setDate] = useState(todayISO());
+  const [nowBk, setNowBk] = useState(bishkekNow);
+  useEffect(() => {
+    const t = setInterval(() => setNowBk(bishkekNow()), 30000);
+    return () => clearInterval(t);
+  }, []);
   const [day, setDay] = useState(emptyDay());
   const [loadingDay, setLoadingDay] = useState(true);
   const [toast, setToast] = useState(null);
@@ -859,6 +904,9 @@ export default function ShipmentApp() {
 
   const submitWarehouse = async (whId) => {
     const wh = WAREHOUSES.find((w) => w.id === whId);
+    if (isSubmitBlocked(wh, date, day[`submitted_${whId}`], bishkekNow())) {
+      return showToast("Заблокировано: данные не поданы вовремя (срок — накануне до 23:30)");
+    }
     // строки с данными, но без номера (если такие остались) получают автономер перед отправкой
     const rowsToSend = assignAutoOrders(day[`rows_${whId}`] || [], mainWh(wh), date);
     const err = submitCheck(wh, rowsToSend, findDuplicateOrders(WAREHOUSES, { ...day, [`rows_${whId}`]: rowsToSend }));
@@ -920,7 +968,7 @@ export default function ShipmentApp() {
   const changeYugDate = (iso) => {
     if (!iso) return;
     const snapped = nextShipDate(iso);
-    if (snapped !== iso) showToast(`Отгрузка бывает только по пн, ср, пт и сб — выбрана ближайшая: ${fmtDateRu(snapped)}`);
+    if (snapped !== iso) showToast(`Выбрана дата отгрузки: ${fmtDateRu(snapped)}`);
     setYDate(snapped);
   };
 
@@ -1079,7 +1127,15 @@ export default function ShipmentApp() {
   const updateVehicle = (id, field, value) => patchVehicles((vs) => vs.map((v) => (v.id === id ? { ...v, [field]: value } : v)));
   const removeVehicle = (id) => patchVehicles((vs) => vs.filter((v) => v.id !== id));
 
-  const consolidated = useMemo(() => consolidateRows(WAREHOUSES, day), [day]);
+  // номера автонумерации КЦП/Сендвичей с неверной датой (от прежнего сдвига +1 день) исправляются при выгрузке
+  const consolidated = useMemo(
+    () =>
+      consolidateRows(WAREHOUSES, day).map((r) => {
+        const w = WAREHOUSES.find((x) => x.id === r.whId);
+        return w && w.autoOrderCode ? { ...r, order: fixAutoOrder(r.order, w, date) } : r;
+      }),
+    [day, date]
+  );
   const karakolConsolidated = useMemo(() => consolidateRows(KARAKOL_WHS, kDay), [kDay]);
   const karakolTransfers = useMemo(() => buildKarakolTransfers(date, karakolConsolidated), [date, karakolConsolidated]);
   const yugDuplicates = useMemo(() => findDuplicateOrders(YUG_WHS, yDay), [yDay]);
@@ -1347,6 +1403,7 @@ export default function ShipmentApp() {
             wh={mainWh(WAREHOUSES.find((w) => w.id === activeTab))}
             rows={day[`rows_${activeTab}`] || []}
             submitted={day[`submitted_${activeTab}`]}
+            blocked={isSubmitBlocked(WAREHOUSES.find((w) => w.id === activeTab), date, day[`submitted_${activeTab}`], nowBk)}
             duplicateOrders={duplicateOrders}
             onUpdate={(rowId, field, value) => updateRow(activeTab, rowId, field, value)}
             onPasteQty={(rowId, field, raw) => pasteQty(activeTab, rowId, field, raw)}
@@ -1394,8 +1451,10 @@ export default function ShipmentApp() {
 // Вкладка склада
 // ---------------------------------------------------------------------------
 
-function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад", stores }) {
+function WarehousePanel({ wh, rows, submitted: submittedProp, blocked = false, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад", stores }) {
   const a = ACCENT[wh.accent];
+  // blocked — срок подачи прошёл (лист закрыт для ввода, снять блокировку нельзя)
+  const submitted = submittedProp || blocked;
   const requiresWeight = Boolean(wh.requiresWeight);
   const requiresCategory = Boolean(wh.perOrderCategory);
   const qtyMode = wh.qtyMode || "default";
@@ -1424,7 +1483,12 @@ function WarehousePanel({ wh, rows, submitted, duplicateOrders, onUpdate, onPast
         </div>
       </div>
 
-      {submitted && (
+      {blocked && (
+        <div className="mb-4 flex items-center gap-2 bg-rose-50 border border-rose-300 text-rose-800 rounded-lg px-4 py-3 text-sm font-semibold">
+          <Lock size={15} /> Заблокировано (данные не поданы вовремя). Подача на {dateLabel} закрывалась накануне в {SUBMIT_DEADLINE_LABEL}.
+        </div>
+      )}
+      {submittedProp && (
         <div className="mb-4 flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
           <div className="flex items-center gap-2 text-sm text-stone-700">
             <Lock size={15} className="text-stone-500" /> Данные за {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
@@ -2795,7 +2859,7 @@ function ShipDateBar({ date, onChange, tone = "orange", title = "" }) {
         Ближайшая
       </button>
       <span className="text-xs text-stone-400">
-        Отгрузка по пн, ср, пт и сб. Заявки вводят накануне и копят до дня отгрузки; новый пустой список открывается со следующей датой отгрузки.
+        Отгрузка ежедневно. Выберите дату отгрузки: стрелки переключают на предыдущий и следующий день.
       </span>
     </div>
   );
