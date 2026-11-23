@@ -597,19 +597,22 @@ export const ZHASHYLCHA_VEHICLES_TEMPLATE = [
   {"extId": "01KG2444M", "plate": "012444M", "carrier": "УмайГрупп", "bodyType": "РЕФ", "pallets": 8, "tons": 4, "own": 1, "vip": 1, "skills": "", "from": "21:00", "to": "19:00", "start": "РЦ Жашылча", "lastName": null, "firstName": null, "gb": false},
 ];
 
+// submitDayBefore: склад подаёт данные накануне (на основной вкладке выбирается дата отгрузки);
+// лист на дату D блокируется после 23:30 дня D−1, если данные не отправлены.
+// КЦП и Сендвичи — так же: выбирается дата отгрузки, срок подачи — накануне до 23:30.
 export const WAREHOUSES = [
-  { id: "prigorodnoe", name: "Пригородное", accent: "emerald", shipPoint: "РЦ Пригородное" },
-  { id: "argo", name: "Ак-Орго", accent: "orange", shipPoint: "РЦ Ак-Орго" },
-  { id: "pto", name: "ПТО", accent: "indigo", shipPoint: "РЦ РМ и ПТО" },
-  { id: "sagadalieva", name: "Садыгалиева (сыпучка)", accent: "sky", shipPoint: "РЦ Садыгалиева - сыпучка", requiresWeight: true, qtyMode: "euroAmerican", unloadPerPalletSec: 600 },
+  { id: "prigorodnoe", name: "Пригородное", accent: "emerald", shipPoint: "РЦ Пригородное", submitDayBefore: true },
+  { id: "argo", name: "Ак-Орго", accent: "orange", shipPoint: "РЦ Ак-Орго", submitDayBefore: true },
+  { id: "pto", name: "ПТО", accent: "indigo", shipPoint: "РЦ РМ и ПТО", submitDayBefore: true },
+  { id: "sagadalieva", name: "Садыгалиева (сыпучка)", accent: "sky", shipPoint: "РЦ Садыгалиева - сыпучка", submitDayBefore: true, requiresWeight: true, qtyMode: "euroAmerican", unloadPerPalletSec: 600 },
   { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose", shipPoint: "РЦ Садыгалиева - заморозка", qtyMode: "palletsBoxes" },
   { id: "hlebzavod", name: "Хлебзавод", accent: "amber", shipPoint: "СП Хлебозавод", qtyMode: "palletsBoxes" },
   { id: "kkcp", name: "ККЦП", accent: "violet", shipPoint: "Кондитерское Центральное Производство", qtyMode: "palletsBoxes", perOrderCategory: true, categories: ["Заморозка", "Охлажденка"], storeDupByCategory: true },
   // КЦП и Сендвичи: только коробки, подача сегодня на завтра (дата выгрузки = дата подачи + 1 день),
   // номер заказа генерируется автоматически: ддммгг (дата отгрузки) + код склада + порядковый номер.
   // shipPoint — название точки отгрузки в TMS (при необходимости поправьте под справочник TMS).
-  { id: "kcp", name: "КЦП", accent: "cyan", shipPoint: "Кулинарное Производство", qtyMode: "boxes", shipNextDay: true, autoOrderCode: "601", perOrderCategory: true, categories: ["Заморозка", "Охлажденка"], storeDupByCategory: true },
-  { id: "sendvichi", name: "Сендвичи (Медерова)", accent: "fuchsia", shipPoint: "СП Глобус 26 Цех", qtyMode: "boxes", shipNextDay: true, autoOrderCode: "602" },
+  { id: "kcp", name: "КЦП", accent: "cyan", shipPoint: "Кулинарное Производство", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "601", perOrderCategory: true, categories: ["Заморозка", "Охлажденка"], storeDupByCategory: true },
+  { id: "sendvichi", name: "Сендвичи (Медерова)", accent: "fuchsia", shipPoint: "Глобус26 Медерова", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "602" },
   { id: "transit_yug", name: "Транзит Юг", accent: "teal", shipPoint: "РЦ Транзит Юг", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
   { id: "transit_sever", name: "Транзит Север", accent: "lime", shipPoint: "РЦ Транзит Север", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
 ];
