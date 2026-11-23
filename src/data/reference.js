@@ -611,8 +611,8 @@ export const WAREHOUSES = [
   // КЦП и Сендвичи: только коробки, подача сегодня на завтра (дата выгрузки = дата подачи + 1 день),
   // номер заказа генерируется автоматически: ддммгг (дата отгрузки) + код склада + порядковый номер.
   // shipPoint — название точки отгрузки в TMS (при необходимости поправьте под справочник TMS).
-  { id: "kcp", name: "КЦП", accent: "cyan", shipPoint: "Кулинарное производство", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "601", perOrderCategory: true, categories: ["Заморозка", "Охлажденка"], storeDupByCategory: true },
-  { id: "sendvichi", name: "Сендвичи (Медерова)", accent: "fuchsia", shipPoint: "Глобус26 Медерова", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "602" },
+  { id: "kcp", name: "КЦП", accent: "cyan", shipPoint: "Кулинарное производство", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "601", perOrderCategory: true, categories: ["СП", "Заморозка"], storeDupByCategory: true },
+  { id: "sendvichi", name: "Сендвичи (Медерова)", accent: "fuchsia", shipPoint: "Глобус26 Медерова", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "602", perOrderCategory: true, categories: ["СП", "Заморозка"], storeDupByCategory: true },
   { id: "transit_yug", name: "Транзит Юг", accent: "teal", shipPoint: "РЦ Транзит Юг", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
   { id: "transit_sever", name: "Транзит Север", accent: "lime", shipPoint: "РЦ Транзит Север", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
 ];
