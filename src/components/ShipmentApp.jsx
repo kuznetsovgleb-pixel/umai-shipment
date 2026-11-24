@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef, createContext
 import {
   Plus, Trash2, Send, Download, Truck, CheckCircle2, Circle, AlertTriangle,
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
-  Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass,
+  Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass, CopyPlus,
 } from "lucide-react";
 import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, TRANSIT_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import { subscribeToUnlocks, setUnlockFlag, unlockKey,
@@ -60,6 +60,34 @@ const isPastDeadline = (dateIso, now) => dateIso < now.iso || (dateIso === now.i
 // Все склады, кроме Жашылчи, подают накануне: лист на дату отгрузки D закрывается после 23:30 дня D−1 (и для прошлых дат).
 const isDateClosed = (dateIso, now) => Boolean(dateIso) && isPastDeadline(addDaysIso(dateIso, -1), now);
 const isSubmitBlocked = (w, dateIso, submitted, now) => !!w && !submitted && isDateClosed(dateIso, now);
+// Перенос заказов с прошлого дня: читаем лист прошлой даты один раз и кладём копию в текущий лист.
+// Номера заказов не переносятся (автономера присваиваются заново), в ОТЛ данные уходят только по кнопке «Отправить».
+const rowHasAny = (r) => ["store", "pallets", "rolls", "euro", "american", "boxes", "weight", "volume"].some((k) => String(r[k] ?? "").trim() !== "");
+const fetchRowsOnce = (subscribe, dateIso, whId) =>
+  new Promise((resolve, reject) => {
+    let done = false;
+    let unsub = null;
+    const finish = (fn, v) => {
+      if (done) return;
+      done = true;
+      setTimeout(() => unsub && unsub(), 0);
+      fn(v);
+    };
+    unsub = subscribe(dateIso, (data) => finish(resolve, data[`rows_${whId}`] || []), (e) => finish(reject, e));
+  });
+const copyPrevDay = async ({ subscribe, prevDate, whId, wh, date, currentRows, patch, showToast, autoNumbers = true }) => {
+  try {
+    const prev = (await fetchRowsOnce(subscribe, prevDate, whId)).filter(rowHasAny);
+    if (!prev.length) return showToast(`За ${fmtDateRu(prevDate)} заказов нет`);
+    if (currentRows.some(rowHasAny) && !window.confirm(`В списке уже есть данные. Заменить их заказами за ${fmtDateRu(prevDate)}?`)) return;
+    const fresh = prev.map((r) => ({ ...r, id: makeEmptyRow().id, order: "" }));
+    patch(() => (autoNumbers ? assignAutoOrders(fresh, wh, date) : fresh));
+    showToast(`Перенесено заказов: ${fresh.length} (за ${fmtDateRu(prevDate)}). Проверьте данные и отправьте в ОТЛ кнопкой`);
+  } catch {
+    showToast("Не удалось загрузить заказы прошлого дня — проверьте связь");
+  }
+};
+
 // Разрешения ОТЛ на подачу после срока: { "<вкладка>__<дата>__<склад>": true }
 const UnlockCtx = createContext({ unlocks: {}, requestUnlock: () => {} });
 const OTL_UNLOCK_CODE = "OTL-2026"; // код ОТЛ для снятия блокировки — при необходимости поменять здесь
@@ -684,8 +712,13 @@ function useRegionDay({ date, store, warehouses, label, scope, unlocks = {}, sav
     }
   };
   const unlock = (whId) => store.setSubmitted(date, whId, false).catch(() => showToast("Не удалось изменить статус"));
+  const copyPrev = (whId) =>
+    copyPrevDay({
+      subscribe: store.subscribe, prevDate: addDaysIso(date, -1), whId, wh: warehouses.find((w) => w.id === whId), date,
+      currentRows: day[`rows_${whId}`] || [], patch: (fn) => patchRows(whId, fn), showToast,
+    });
 
-  return { day, loading, duplicates, consolidated, update, add, remove, submit, unlock, patchRows };
+  return { day, loading, duplicates, consolidated, update, add, remove, submit, unlock, patchRows, copyPrev };
 }
 
 const BK_STORE = { empty: emptyBazarKorgonDay, subscribe: subscribeToBazarKorgonDay, saveRows: saveBazarKorgonRows, setSubmitted: setBazarKorgonSubmitted };
@@ -973,6 +1006,11 @@ export default function ShipmentApp() {
       assignAutoOrders(rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)), kwh, date)
     );
   };
+  const copyPrevKarakol = (whId) =>
+    copyPrevDay({
+      subscribe: subscribeToKarakolDay, prevDate: addDaysIso(date, -1), whId, wh: KARAKOL_WHS.find((w) => w.id === whId), date,
+      currentRows: kDay[`rows_${whId}`] || [], patch: (fn) => patchKarakolRows(whId, fn), showToast,
+    });
   const addKarakolRow = (whId) => patchKarakolRows(whId, (rows) => [...rows, makeEmptyRow()]);
   const removeKarakolRow = (whId, rowId) =>
     patchKarakolRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
@@ -1024,6 +1062,17 @@ export default function ShipmentApp() {
       assignAutoOrders(rows.map((r) => (r.id === rowId ? { ...r, [field]: sanitizeField(field, value) } : r)), ywh, yDate)
     );
   };
+  const yugPrevDate = () => stepShipDate(yDate, -1);
+  const copyPrevYugWh = (whId) =>
+    copyPrevDay({
+      subscribe: subscribeToHolodYugDay, prevDate: yugPrevDate(), whId, wh: YUG_WHS.find((w) => w.id === whId), date: yDate,
+      currentRows: yDay[`rows_${whId}`] || [], patch: (fn) => patchYugRows(whId, fn), showToast,
+    });
+  const copyPrevYugTr = () =>
+    copyPrevDay({
+      subscribe: subscribeToHolodYugDay, prevDate: yugPrevDate(), whId: "transit_yug", wh: null, date: yDate,
+      currentRows: yDay.rows_transit_yug || [], patch: (fn) => patchYugRows("transit_yug", fn), showToast, autoNumbers: false,
+    });
   const addYugWh = (whId) => patchYugRows(whId, (rows) => [...rows, makeEmptyRow()]);
   const removeYugWh = (whId, rowId) =>
     patchYugRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
@@ -1297,7 +1346,7 @@ export default function ShipmentApp() {
               <KarakolPanel
                 kDay={trBk.day} loading={trBk.loading} sub={trBkSub} onSubChange={setTrBkSub}
                 duplicateOrders={trBk.duplicates}
-                onUpdate={trBk.update} onAdd={trBk.add} onRemove={trBk.remove} onSubmit={trBk.submit} onUnlock={trBk.unlock}
+                onCopyPrev={trBk.copyPrev} onUpdate={trBk.update} onAdd={trBk.add} onRemove={trBk.remove} onSubmit={trBk.submit} onUnlock={trBk.unlock}
                 consolidated={trBk.consolidated} transfers={trBkTransfers} onExport={exportTrBk}
                 date={date} dateLabel={fmtDateRu(date)}
                 name="Транзиты → Базар-Коргон" point={BAZAR_KORGON_POINT}
@@ -1308,7 +1357,7 @@ export default function ShipmentApp() {
               <KarakolPanel
                 kDay={trOsh.day} loading={trOsh.loading} sub={trOshSub} onSubChange={setTrOshSub}
                 duplicateOrders={trOsh.duplicates}
-                onUpdate={trOsh.update} onAdd={trOsh.add} onRemove={trOsh.remove} onSubmit={trOsh.submit} onUnlock={trOsh.unlock}
+                onCopyPrev={trOsh.copyPrev} onUpdate={trOsh.update} onAdd={trOsh.add} onRemove={trOsh.remove} onSubmit={trOsh.submit} onUnlock={trOsh.unlock}
                 consolidated={trOsh.consolidated} transfers={trOshTransfers} onExport={exportTrOsh}
                 date={date} dateLabel={fmtDateRu(date)}
                 name="Транзиты → Ош" point={OSH_POINT}
@@ -1339,6 +1388,7 @@ export default function ShipmentApp() {
             onSubChange={setBkSub}
             duplicateOrders={bk.duplicates}
             onUpdate={bk.update}
+            onCopyPrev={bk.copyPrev}
             onAdd={bk.add}
             onRemove={bk.remove}
             onSubmit={bk.submit}
@@ -1366,6 +1416,7 @@ export default function ShipmentApp() {
             onSubChange={setOshSub}
             duplicateOrders={osh.duplicates}
             onUpdate={osh.update}
+            onCopyPrev={osh.copyPrev}
             onAdd={osh.add}
             onRemove={osh.remove}
             onSubmit={osh.submit}
@@ -1394,7 +1445,7 @@ export default function ShipmentApp() {
             whp={{
               duplicateOrders: yugDuplicates,
               onUpdate: updateYugWh, onAdd: addYugWh, onRemove: removeYugWh,
-              onSubmit: submitYugWh, onUnlock: unlockYugWh,
+              onSubmit: submitYugWh, onUnlock: unlockYugWh, onCopyPrev: copyPrevYugWh,
             }}
             zh={{
               onUpdate: updateYugZh, onAdd: addYugZh, onRemove: removeYugZh,
@@ -1402,7 +1453,7 @@ export default function ShipmentApp() {
             }}
             tr={{
               onUpdate: updateYugTr, onAdd: addYugTr, onRemove: removeYugTr,
-              onSubmit: submitYugTr, onUnlock: unlockYugTr,
+              onSubmit: submitYugTr, onUnlock: unlockYugTr, onCopyPrev: copyPrevYugTr,
             }}
             consolidated={yugConsolidated}
             onExport={exportYug}
@@ -1415,6 +1466,7 @@ export default function ShipmentApp() {
             onSubChange={setKarakolSub}
             duplicateOrders={karakolDuplicateOrders}
             onUpdate={updateKarakolRow}
+            onCopyPrev={copyPrevKarakol}
             onAdd={addKarakolRow}
             onRemove={removeKarakolRow}
             onSubmit={submitKarakol}
@@ -1434,6 +1486,10 @@ export default function ShipmentApp() {
             rows={day[`rows_${activeTab}`] || []}
             submitted={day[`submitted_${activeTab}`]}
             date={date}
+            onCopyPrev={() => copyPrevDay({
+              subscribe: subscribeToDay, prevDate: addDaysIso(date, -1), whId: activeTab, wh: mainWh(WAREHOUSES.find((w) => w.id === activeTab)), date,
+              currentRows: day[`rows_${activeTab}`] || [], patch: (fn) => patchWarehouseRows(activeTab, fn), showToast,
+            })}
             duplicateOrders={duplicateOrders}
             onUpdate={(rowId, field, value) => updateRow(activeTab, rowId, field, value)}
             onPasteQty={(rowId, field, raw) => pasteQty(activeTab, rowId, field, raw)}
@@ -1482,7 +1538,7 @@ export default function ShipmentApp() {
 // Вкладка склада
 // ---------------------------------------------------------------------------
 
-function WarehousePanel({ wh, rows, submitted: submittedProp, date, scope, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад", stores }) {
+function WarehousePanel({ wh, rows, submitted: submittedProp, date, scope, onCopyPrev, duplicateOrders, onUpdate, onPasteQty, onAdd, onRemove, onSubmit, onUnlock, dateLabel, prefix = "Склад", stores }) {
   const a = ACCENT[wh.accent];
   // blocked — срок подачи прошёл (лист закрыт для ввода, снять блокировку нельзя)
   const { blocked, reopened, request: requestUnlock } = useSheetBlocked(scope || prefix, date, wh.id, submittedProp);
@@ -1513,6 +1569,11 @@ function WarehousePanel({ wh, rows, submitted: submittedProp, date, scope, dupli
             {qtyMode === "palletsAmericanBoxes" && " Вес считается автоматически, вручную вводить не нужно."}
           </p>
         </div>
+        {onCopyPrev && !submitted && (
+          <button onClick={onCopyPrev} className="flex items-center gap-1.5 shrink-0 text-xs font-semibold text-stone-700 bg-white border border-stone-300 hover:border-stone-500 rounded-lg px-3 py-2">
+            <CopyPlus size={14} /> Перенести заказы с прошлого дня
+          </button>
+        )}
       </div>
 
       {blocked && (
@@ -2129,7 +2190,7 @@ function OtlPanel({
 
 function KarakolPanel({
   kDay, loading, sub, onSubChange, duplicateOrders,
-  onUpdate, onAdd, onRemove, onSubmit, onUnlock,
+  onUpdate, onAdd, onRemove, onSubmit, onUnlock, onCopyPrev,
   consolidated, transfers, onExport, dateLabel, date,
   name = "Каракол", point = KARAKOL_POINT, warehouses = KARAKOL_WHS, stores = KARAKOL_STORES,
   transferPrefix = "003", Icon = Mountain, tone = "fuchsia",
@@ -2203,6 +2264,7 @@ function KarakolPanel({
           rows={kDay[`rows_${sub}`] || []}
           submitted={kDay[`submitted_${sub}`]}
           date={date}
+          onCopyPrev={onCopyPrev ? () => onCopyPrev(sub) : undefined}
           duplicateOrders={duplicateOrders}
           onUpdate={(rowId, field, value) => onUpdate(sub, rowId, field, value)}
           onPasteQty={(rowId, field, raw) => onUpdate(sub, rowId, field, sanitizeQty(raw))}
@@ -2991,6 +3053,7 @@ function SeverPanel({ date, sDay, loading, sub, onSubChange, whp, consolidated, 
           rows={sDay[`rows_${whId}`] || []}
           submitted={sDay[`submitted_${whId}`]}
           date={date}
+          onCopyPrev={() => whp.copyPrev(whId)}
           duplicateOrders={whp.duplicates}
           onUpdate={(rowId, field, value) => whp.update(whId, rowId, field, value)}
           onPasteQty={(rowId, field, raw) => whp.update(whId, rowId, field, sanitizeQty(raw))}
@@ -3079,6 +3142,7 @@ function HolodYugPanel({ date, onDateChange, yDay, loading, sub, onSubChange, wh
           rows={yDay[`rows_${whId}`] || []}
           submitted={yDay[`submitted_${whId}`]}
           date={date}
+          onCopyPrev={() => whp.onCopyPrev(whId)}
           duplicateOrders={whp.duplicateOrders}
           onUpdate={(rowId, field, value) => whp.onUpdate(whId, rowId, field, value)}
           onPasteQty={(rowId, field, raw) => whp.onUpdate(whId, rowId, field, sanitizeQty(raw))}
@@ -3307,7 +3371,7 @@ function YugZhashylchaPanel({ rows, submitted: submittedProp, dateLabel, onUpdat
 // больше по весу или объёму — несколько. Заказы одного магазина и одной группы объединяются.
 // ---------------------------------------------------------------------------
 
-function YugTransitPanel({ rows, submitted: submittedProp, date, dateLabel, onUpdate, onAdd, onRemove, onSubmit, onUnlock }) {
+function YugTransitPanel({ rows, submitted: submittedProp, date, dateLabel, onCopyPrev, onUpdate, onAdd, onRemove, onSubmit, onUnlock }) {
   const a = ACCENT.teal;
   const { blocked, reopened, request: requestUnlock } = useSheetBlocked("Холод Юг", date, "transit_yug", submittedProp);
   const submitted = submittedProp || blocked;
@@ -3329,6 +3393,7 @@ function YugTransitPanel({ rows, submitted: submittedProp, date, dateLabel, onUp
 
   return (
     <div className="space-y-5">
+      <div className="flex items-start justify-between gap-3">
       <div>
         <div className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${a.text} mb-1`}>
           <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Холод Юг · {YUG_TR_NAME}
@@ -3337,6 +3402,12 @@ function YugTransitPanel({ rows, submitted: submittedProp, date, dateLabel, onUp
           Заказ №, магазин, вес, объём (или коробки) и товарная группа на отгрузку {dateLabel}. Паллеты: до {500} кг и до {1} м³ — одна паллета,
           больше по весу или объёму — несколько. Коробки пересчитываются в паллеты автоматически (до 20 шт — 0,5 паллеты, 21–40 — 1 и так далее); если указаны и вес/объём, и коробки, берётся большее число паллет. Заказы одного магазина в одной группе объединяются в один (вес, объём и коробки суммируются). Точка отгрузки — {YUG_TR_SHIP_POINT}.
         </p>
+      </div>
+      {onCopyPrev && !submitted && (
+        <button onClick={onCopyPrev} className="flex items-center gap-1.5 shrink-0 text-xs font-semibold text-stone-700 bg-white border border-stone-300 hover:border-stone-500 rounded-lg px-3 py-2">
+          <CopyPlus size={14} /> Перенести заказы с прошлого дня
+        </button>
+      )}
       </div>
 
       {blocked && (
