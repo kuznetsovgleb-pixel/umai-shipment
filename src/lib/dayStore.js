@@ -1,4 +1,4 @@
-import { doc, onSnapshot, setDoc, getDoc } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, getDoc, runTransaction } from "firebase/firestore";
 import { db } from "../firebase";
 import { VEHICLES_TEMPLATE, ZHASHYLCHA_VEHICLES_TEMPLATE, KARAKOL_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, TRANSIT_WAREHOUSE_IDS, SEVER_WAREHOUSE_IDS } from "../data/reference";
 
@@ -57,6 +57,17 @@ export const emptyDay = () => ({
   vehicles: seedVehiclesForDay(),
 });
 
+// Создание пустого дня — ТОЛЬКО если документа на сервере действительно нет.
+// Раньше здесь был setDoc(seed, {merge:true}): при плохой связи onSnapshot мог на мгновение
+// сообщить «документа нет» (данные из кэша), и отложенная запись пустого дня затирала
+// заполненные склады (массивы rows_* при merge заменяются целиком). Транзакция читает
+// документ с сервера и не работает офлайн, поэтому затереть данные уже не может.
+const seedIfMissing = (ref, seed) =>
+  runTransaction(db, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) tx.set(ref, seed);
+  }).catch((err) => console.error("[dayStore] seed creation failed", err));
+
 const dayRef = (date) => doc(db, "shipments", date);
 
 export function subscribeToDay(date, onChange, onError) {
@@ -76,9 +87,7 @@ export function subscribeToDay(date, onChange, onError) {
         const seed = emptyDay();
         // merge:true — на случай, если два клиента одновременно откроют
         // новый день, вторая запись не затрёт первую, а сольётся с ней.
-        setDoc(dayRef(date), seed, { merge: true }).catch((err) =>
-          console.error("[dayStore] seed creation failed for", date, err)
-        );
+        seedIfMissing(dayRef(date), seed);
         onChange(seed);
       }
     },
@@ -189,9 +198,7 @@ export function subscribeToZhashylchaDay(date, onChange, onError) {
         onChange(snap.data());
       } else {
         const seed = emptyZhashylchaDay();
-        setDoc(zhashylchaRef(date), seed, { merge: true }).catch((err) =>
-          console.error("[dayStore] zhashylcha seed creation failed for", date, err)
-        );
+        seedIfMissing(zhashylchaRef(date), seed);
         onChange(seed);
       }
     },
@@ -267,9 +274,7 @@ export function subscribeToKarakolDay(date, onChange, onError) {
         }
       } else {
         const seed = emptyKarakolDay();
-        setDoc(karakolRef(date), seed, { merge: true }).catch((err) =>
-          console.error("[dayStore] karakol seed creation failed for", date, err)
-        );
+        seedIfMissing(karakolRef(date), seed);
         onChange(seed);
       }
     },
@@ -335,9 +340,7 @@ const makeRegionStore = (collectionName, whIds, yugKeys = []) => {
           }
         } else {
           const seed = empty();
-          setDoc(refFor(date), seed, { merge: true }).catch((err) =>
-            console.error(`[dayStore] ${collectionName} seed creation failed for`, date, err)
-          );
+          seedIfMissing(refFor(date), seed);
           onChange(seed);
         }
       },
@@ -447,9 +450,7 @@ export function subscribeToHolodYugDay(date, onChange, onError) {
         }
       } else {
         const seed = emptyHolodYugDay();
-        setDoc(holodYugRef(date), seed, { merge: true }).catch((err) =>
-          console.error("[dayStore] holod_yug seed creation failed for", date, err)
-        );
+        seedIfMissing(holodYugRef(date), seed);
         onChange(seed);
       }
     },
