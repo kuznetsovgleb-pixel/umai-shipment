@@ -649,7 +649,7 @@ export const TRANSIT_TRANSFER_IDS = [...REGION_WAREHOUSE_IDS, ...TRANSIT_WAREHOU
 export const AUTO_ORDER_CODES = {
   main: { hlebzavod: "603", kkcp: "604", transit_yug: "605", transit_sever: "606" },
   yug: { hlebzavod: "703", kkcp: "704" },
-  sever: { hlebzavod: "803", kkcp: "804", kcp: "801", sendvichi: "802", transit_yug: "805" },
+  sever: { hlebzavod: "803", kkcp: "804", kcp: "801", sendvichi: "802", transit_yug: "805", transit_sever: "806" },
   karakol: { transit_sever: "906" },
   bazar_korgon: {},
   osh: {},
@@ -667,7 +667,7 @@ export const OSH_STORES = HOLOD_YUG_STORES.filter((s) => s !== OSH_POINT);
 // (РЦ Жашылча — Молоко/СОФ — подключается в этой же вкладке отдельным блоком.)
 // Список магазинов — фиксированный (Нарын, Балыкчы, Каракол и др.).
 // ---------------------------------------------------------------------------
-export const SEVER_WAREHOUSE_IDS = ["sagadalieva_zamorozka", "kkcp", "hlebzavod", "kcp", "sendvichi", "transit_yug"];
+export const SEVER_WAREHOUSE_IDS = ["sagadalieva_zamorozka", "kkcp", "hlebzavod", "kcp", "sendvichi", "transit_yug", "transit_sever"];
 const SEVER_STORES_RAW = [
   "Глобус62",
   "Глобус72",
