@@ -2427,14 +2427,12 @@ function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpd
 }
 
 function ZhashylchaPanel({ date }) {
-  // ввод только на сегодня: календарик наверху для ПРОСМОТРА —
-  // назад архив прошлых дней, вперёд пустая форма
+  // Как у остальных складов: заказы подаются накануне на выбранную дату, лист на дату D закрывается
+  // после 23:30 дня D−1 (ОТЛ может открыть по запросу). Прошлые даты — архив, только просмотр.
   const zhDate = date;
-  const today = todayISO();
-  const isToday = zhDate === today;
-  const isFuture = zhDate > today;
-  // приём заказов на сегодняшний список — до 11:00 (после — предупреждаем, но не блокируем)
-  const lateNow = isToday && new Date().getHours() >= ZH_CUTOFF_HOUR;
+  const { blocked: zhBlocked, reopened: zhReopened, request: zhRequestUnlock } = useSheetBlocked("Жашылча", zhDate, "zh", false);
+  const lateNow = false;
+  const isToday = !zhBlocked; // правка списка машин и ввод доступны, пока лист не закрыт
 
   const [zhDay, setZhDay] = useState(emptyZhDay());
   const [zhLoading, setZhLoading] = useState(true);
@@ -2452,19 +2450,13 @@ function ZhashylchaPanel({ date }) {
   };
 
   useEffect(() => {
-    // будущая дата — заказы день в день, туда ещё рано, базу не трогаем вообще
-    if (zhDate > todayISO()) {
-      setZhDay(emptyZhDay());
-      setZhLoading(false);
-      return;
-    }
     setZhLoading(true);
     const unsub = subscribeToZhashylchaDay(
       zhDate,
       (data) => {
         // самовосстановление списка машин — только для сегодняшнего дня;
         // для архивных дат ничего не досоздаём, это просто просмотр истории
-        if (zhDate === todayISO() && (!data.vehicles || data.vehicles.length === 0)) {
+        if (zhDate >= todayISO() && (!data.vehicles || data.vehicles.length === 0)) {
           const seeded = seedZhashylchaVehicles();
           setZhDay({ ...data, vehicles: seeded });
           saveZhashylchaVehicles(zhDate, seeded).catch(() => {});
@@ -2650,20 +2642,6 @@ function ZhashylchaPanel({ date }) {
     );
   }
 
-  if (isFuture) {
-    return (
-      <div className="space-y-4">
-        <div className="bg-cyan-50 border border-cyan-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-cyan-800">
-          <Moon size={14} />
-          Отдельный контур: заказы подаются день в день, дата ввода всегда «сегодня» ({fmtDateRu(today)}).
-        </div>
-        <div className="bg-white border border-stone-200 rounded-xl px-6 py-16 text-center text-sm text-stone-400">
-          {dateLabel} ещё не наступила — форма для {ZH_DISPLAY_NAME} откроется автоматически в этот день.
-        </div>
-      </div>
-    );
-  }
-
   const pill = (active) =>
     `flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
       active ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
@@ -2678,10 +2656,19 @@ function ZhashylchaPanel({ date }) {
     <div className="space-y-5">
       <div className="bg-cyan-50 border border-cyan-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-cyan-800">
         <Moon size={14} />
-        {isToday
-          ? `Список на ${dateLabel}: заказы подаются до ${ZH_CUTOFF_HOUR}:00, доставка с 18:00 ${dateLabel} до 18:00 следующего дня. Дата доставки в выгрузке — ${dateLabel}. «Молоко» — выгрузка для ОТЛ, «СОФ» — только ввод, без выгрузки.`
-          : `Архив за ${dateLabel} — только просмотр. Ввод и редактирование доступны исключительно на сегодняшний день (${fmtDateRu(today)}).`}
+        {`Список на ${dateLabel}: заказы подаются накануне до ${SUBMIT_DEADLINE_LABEL}, доставка с 18:00 ${dateLabel} до 18:00 следующего дня. Дата доставки в выгрузке — ${dateLabel}. «Молоко» — выгрузка для ОТЛ, «СОФ» — только ввод, без выгрузки.`}
       </div>
+      {zhBlocked && !(submittedMilk && submittedSof) && (
+        <div className="flex items-center gap-2 bg-rose-50 border border-rose-300 text-rose-800 rounded-lg px-4 py-3 text-sm font-semibold">
+          <Lock size={15} /> Заблокировано (данные не поданы вовремя). Подача на {dateLabel} закрывалась накануне в {SUBMIT_DEADLINE_LABEL}.
+          <button onClick={zhRequestUnlock} className="ml-auto text-xs font-semibold underline underline-offset-2 whitespace-nowrap">Разрешить подачу (ОТЛ)</button>
+        </div>
+      )}
+      {zhReopened && (
+        <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-3 text-sm">
+          <Lock size={15} /> Подача на {dateLabel} открыта ОТЛ по запросу — отправьте данные в транспортный отдел.
+        </div>
+      )}
       {lateNow && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-amber-800">
           <AlertTriangle size={14} />
@@ -2709,7 +2696,7 @@ function ZhashylchaPanel({ date }) {
         <YugZhashylchaPanel
           rows={rowsMilk}
           submitted={submittedMilk}
-          readOnly={!isToday}
+          readOnly={zhBlocked}
           stores={STORES_ZHASHYLCHA}
           heading={`${ZH_DISPLAY_NAME} · Молоко`}
           description={`Заказы на ${dateLabel}: загрузите файл из 1С или добавьте строки вручную. Магазин подбирается по названию, а если не нашёлся — выберите из списка. Заказы одного магазина объединяются в один (вес и объём суммируются). Паллеты: до 500 кг и до 1 м³ — одна паллета, больше по весу или объёму — несколько. Точка отгрузки — ${ZH_SHIP_POINT}, группа — ${ZH_GROUP}.`}
@@ -2726,7 +2713,7 @@ function ZhashylchaPanel({ date }) {
           title="СОФ"
           rows={rowsSof}
           submitted={submittedSof}
-          canEdit={isToday}
+          canEdit={!zhBlocked}
           duplicateOrders={duplicateOrders}
           onUpdate={updateSof}
           onAdd={addSof}
