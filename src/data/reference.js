@@ -606,12 +606,12 @@ export const WAREHOUSES = [
   { id: "pto", name: "ПТО", accent: "indigo", shipPoint: "РЦ РМ и ПТО", submitDayBefore: true },
   { id: "sagadalieva", name: "Садыгалиева (сыпучка)", accent: "sky", shipPoint: "РЦ Садыгалиева - сыпучка", submitDayBefore: true, requiresWeight: true, qtyMode: "euroAmerican", unloadPerPalletSec: 600 },
   { id: "sagadalieva_zamorozka", name: "Садыгалиева (заморозка)", accent: "rose", shipPoint: "РЦ Садыгалиева - заморозка", qtyMode: "palletsBoxes" },
-  { id: "hlebzavod", name: "Хлебзавод", accent: "amber", shipPoint: "СП Хлебозавод", qtyMode: "palletsBoxes" },
-  { id: "kkcp", name: "ККЦП", accent: "violet", shipPoint: "Кондитерское Центральное Производство", qtyMode: "palletsBoxes", perOrderCategory: true, categories: ["Заморозка", "Охлажденка"], storeDupByCategory: true },
+  { id: "hlebzavod", name: "Хлебзавод", accent: "amber", shipPoint: "СП Хлебозавод", qtyMode: "palletsBoxes", perOrderCategory: true, categories: ["СП", "Заморозка"], storeDupByCategory: true },
+  { id: "kkcp", name: "ККЦП", accent: "violet", shipPoint: "Кондитерское Центральное Производство", qtyMode: "palletsBoxes", perOrderCategory: true, categories: ["СП", "Заморозка"], storeDupByCategory: true },
   // КЦП и Сендвичи: только коробки, подача сегодня на завтра (дата выгрузки = дата подачи + 1 день),
   // номер заказа генерируется автоматически: ддммгг (дата отгрузки) + код склада + порядковый номер.
   // shipPoint — название точки отгрузки в TMS (при необходимости поправьте под справочник TMS).
-  { id: "kcp", name: "КЦП", accent: "cyan", shipPoint: "Кулинарное производство", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "601", perOrderCategory: true, categories: ["СП", "Заморозка"], storeDupByCategory: true },
+  { id: "kcp", name: "КЦП (Кулинария)", accent: "cyan", shipPoint: "Кулинарное производство", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "601", perOrderCategory: true, categories: ["СП", "Заморозка"], storeDupByCategory: true },
   { id: "sendvichi", name: "Сендвичи (Медерова)", accent: "fuchsia", shipPoint: "Глобус26 Медерова", qtyMode: "boxes", submitDayBefore: true, autoOrderCode: "602", perOrderCategory: true, categories: ["СП", "Заморозка"], storeDupByCategory: true },
   { id: "transit_yug", name: "Транзит Юг", accent: "teal", shipPoint: "РЦ Транзит Юг", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
   { id: "transit_sever", name: "Транзит Север", accent: "lime", shipPoint: "РЦ Транзит Север", qtyMode: "palletsAmericanBoxes", perOrderCategory: true },
