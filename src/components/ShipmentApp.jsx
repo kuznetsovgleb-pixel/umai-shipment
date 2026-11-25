@@ -2,9 +2,9 @@ import React, { useState, useMemo, useCallback, useEffect, useRef, createContext
 import {
   Plus, Trash2, Send, Download, Truck, CheckCircle2, Circle, AlertTriangle,
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
-  Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass, CopyPlus,
+  Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass, CopyPlus, RotateCcw,
 } from "lucide-react";
-import { WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, TRANSIT_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
+import { RETURNS_WH, RETURNS_STORES, WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, TRANSIT_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import { subscribeToUnlocks, setUnlockFlag, unlockKey,
   subscribeToDay, makeEmptyRow, emptyDay, seedVehiclesForDay, saveWarehouseRows, setSubmitted, saveVehicles,
   subscribeToZhashylchaDay, setZhashylchaSubmitted, saveZhashylchaRows, saveZhashylchaVehicles, seedZhashylchaVehicles,
@@ -15,8 +15,9 @@ import { subscribeToUnlocks, setUnlockFlag, unlockKey,
   emptyTransitBkDay, subscribeToTransitBkDay, saveTransitBkRows, setTransitBkSubmitted,
   emptyTransitOshDay, subscribeToTransitOshDay, saveTransitOshRows, setTransitOshSubmitted,
   emptySeverDay, subscribeToSeverDay, saveSeverRows, setSeverSubmitted, SEVER_ZH_KEYS,
+  emptyReturnsDay, subscribeToReturnsDay, saveReturnsRows, setReturnsSubmitted,
 } from "../lib/dayStore";
-import { downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook, buildBazarKorgonTransfers, buildOshTransfers, downloadBazarKorgonWorkbook, downloadOshWorkbook, buildTransitBkTransfers, buildTransitOshTransfers, downloadTransitBkWorkbook, downloadTransitOshWorkbook, downloadSeverWorkbook } from "../lib/exportExcel";
+import { downloadReturnsWorkbook, downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook, buildBazarKorgonTransfers, buildOshTransfers, downloadBazarKorgonWorkbook, downloadOshWorkbook, buildTransitBkTransfers, buildTransitOshTransfers, downloadTransitBkWorkbook, downloadTransitOshWorkbook, downloadSeverWorkbook } from "../lib/exportExcel";
 import {
   YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort, BK_OSH_SHIP_WEEKDAYS, boxesToPallets as yugBoxesToPallets,
   collapseYugRows, parseYugFile, yugPallets,
@@ -60,9 +61,42 @@ const isPastDeadline = (dateIso, now) => dateIso < now.iso || (dateIso === now.i
 // Все склады, кроме Жашылчи, подают накануне: лист на дату отгрузки D закрывается после 23:30 дня D−1 (и для прошлых дат).
 const isDateClosed = (dateIso, now) => Boolean(dateIso) && isPastDeadline(addDaysIso(dateIso, -1), now);
 const isSubmitBlocked = (w, dateIso, submitted, now) => !!w && !submitted && isDateClosed(dateIso, now);
+// ---- Возвраты: строка = отправитель (store), получатель (receiver), паллеты / роллы / коробки ----
+const returnsIssues = (r) => {
+  const qty = r.pallets !== "" || r.rolls !== "" || r.boxes !== "";
+  const hasData = Boolean(r.store || r.receiver || qty);
+  if (!hasData) return { hasData: false, incomplete: false };
+  const missingSender = !r.store;
+  const missingReceiver = !r.receiver;
+  const missingQty = !qty;
+  const same = Boolean(r.store) && r.store === r.receiver;
+  return { hasData: true, missingSender, missingReceiver, missingQty, same, incomplete: missingSender || missingReceiver || missingQty || same };
+};
+const returnsSubmitCheck = (wh, allRows) => {
+  const rows = allRows.filter((r) => returnsIssues(r).hasData);
+  if (rows.length === 0) return "Нет заполненных строк для отправки";
+  const bad = rows.filter((r) => returnsIssues(r).incomplete).length;
+  if (bad > 0) return bad === 1 ? "Одна строка заполнена не полностью — проверьте подсвеченные поля" : `${bad} строк заполнены не полностью — проверьте подсвеченные поля`;
+  return null;
+};
+// отправленные возвраты → строки выгрузки: точка отгрузки = отправитель, точка доставки = получатель
+const consolidateReturns = (dayData) => {
+  if (!dayData.submitted_returns) return [];
+  return (dayData.rows_returns || [])
+    .filter((r) => returnsIssues(r).hasData && (r.order || "").trim())
+    .map((r) => {
+      const pallets = parseInt(r.pallets, 10) || 0;
+      const rolls = parseInt(r.rolls, 10) || 0;
+      const boxes = parseInt(r.boxes, 10) || 0;
+      const total = Math.ceil((pallets + rolls * COEFFICIENT + boxesToPallets(boxes)) * 100) / 100;
+      const weight = Math.round(((pallets + boxesToPallets(boxes)) * PALLET_KG + rolls * ROLL_KG) * 100) / 100;
+      return { id: r.id, order: r.order.trim(), sender: r.store, receiver: r.receiver, pallets, rolls, boxes, total, weight, unloadSec: PALLET_UNLOAD_SEC };
+    });
+};
+
 // Перенос заказов с прошлого дня: читаем лист прошлой даты один раз и кладём копию в текущий лист.
 // Номера заказов не переносятся (автономера присваиваются заново), в ОТЛ данные уходят только по кнопке «Отправить».
-const rowHasAny = (r) => ["store", "pallets", "rolls", "euro", "american", "boxes", "weight", "volume"].some((k) => String(r[k] ?? "").trim() !== "");
+const rowHasAny = (r) => ["store", "receiver", "pallets", "rolls", "euro", "american", "boxes", "weight", "volume"].some((k) => String(r[k] ?? "").trim() !== "");
 const fetchRowsOnce = (subscribe, dateIso, whId) =>
   new Promise((resolve, reject) => {
     let done = false;
@@ -196,7 +230,7 @@ const findDuplicateStores = (rows, byCategory = false) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "kcp", "sendvichi", "transit_yug", "transit_sever", "zhashylcha", "karakol", "bazar_korgon", "osh", "transit", "sever", "holod_yug", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "kcp", "sendvichi", "transit_yug", "transit_sever", "returns", "zhashylcha", "karakol", "bazar_korgon", "osh", "transit", "sever", "holod_yug", "otl"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -379,9 +413,11 @@ const consolidateRows = (warehouses, dayData) => {
 // склады Холода Юга с той же формой, что и на основных вкладках
 const YUG_WH_IDS = ["sagadalieva_zamorozka", "hlebzavod", "kkcp"];
 const YUG_WHS = withAuto(YUG_WH_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "yug");
-const REGION_WHS = withAuto(REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "bazar_korgon");
-const OSH_WHS = withAuto(OSH_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "osh");
-const KARAKOL_WHS = withAuto(KARAKOL_WAREHOUSES, "karakol");
+// ПТО в Караколе, Базар-Коргоне и Оше подаёт паллеты и коробки (вместо роллов)
+const ptoBoxes = (list) => list.map((w) => (w.id === "pto" ? { ...w, qtyMode: "palletsBoxes" } : w));
+const REGION_WHS = ptoBoxes(withAuto(REGION_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "bazar_korgon"));
+const OSH_WHS = ptoBoxes(withAuto(OSH_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "osh"));
+const KARAKOL_WHS = ptoBoxes(withAuto(KARAKOL_WAREHOUSES, "karakol"));
 const TR_BK_WHS = withAuto(TRANSIT_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "transit_bk");
 const TR_OSH_WHS = withAuto(TRANSIT_WAREHOUSE_IDS.map((id) => WAREHOUSES.find((w) => w.id === id)), "transit_osh");
 // в «Регионах» у Хлебзавода категория выбирается по каждому заказу (Заморозка / Сухой),
@@ -399,6 +435,7 @@ const SEVER_ZH_FORMS = [
 ];
 const SEVER_STATUS_WHS = [...SEVER_WHS, ...SEVER_ZH_FORMS];
 const SPECIAL_TABS = {
+  returns: { label: "Возвраты", Icon: RotateCcw, accent: "rose" },
   zhashylcha: { label: "РЦ Жашылча", Icon: Moon, accent: "cyan" },
   karakol: { label: "Каракол", Icon: Mountain, accent: "fuchsia" },
   bazar_korgon: { label: "РЦ Базар-Коргон", Icon: MapPin, accent: "orange" },
@@ -646,7 +683,7 @@ function StoreSelect({ value, onChange, disabled, hasError, stores = STORES_NO_K
 
 // Региональная вкладка с обычными формами складов (Базар-Коргон, Ош, Север):
 // подписка на дату, правка строк (debounce), проверки и отправка, консолидация
-function useRegionDay({ date, store, warehouses, label, scope, unlocks = {}, saveTimers, showToast }) {
+function useRegionDay({ date, store, warehouses, label, scope, unlocks = {}, check = submitCheck, saveTimers, showToast }) {
   const [day, setDay] = useState(store.empty());
   const [loading, setLoading] = useState(true);
 
@@ -698,7 +735,7 @@ function useRegionDay({ date, store, warehouses, label, scope, unlocks = {}, sav
       return showToast("Заблокировано: данные не поданы вовремя (срок — накануне до 23:30)");
     }
     const rowsToSend = assignAutoOrders(day[`rows_${whId}`] || [], wh, date);
-    const err = submitCheck(wh, rowsToSend, findDuplicateOrders(warehouses, { ...day, [`rows_${whId}`]: rowsToSend }));
+    const err = check(wh, rowsToSend, findDuplicateOrders(warehouses, { ...day, [`rows_${whId}`]: rowsToSend }));
     if (err) return showToast(err);
     try {
       // сначала гарантированно сохраняем строки, потом ставим «отправлено» —
@@ -724,6 +761,8 @@ function useRegionDay({ date, store, warehouses, label, scope, unlocks = {}, sav
 const BK_STORE = { empty: emptyBazarKorgonDay, subscribe: subscribeToBazarKorgonDay, saveRows: saveBazarKorgonRows, setSubmitted: setBazarKorgonSubmitted };
 const TR_BK_STORE = { empty: emptyTransitBkDay, subscribe: subscribeToTransitBkDay, saveRows: saveTransitBkRows, setSubmitted: setTransitBkSubmitted };
 const TR_OSH_STORE = { empty: emptyTransitOshDay, subscribe: subscribeToTransitOshDay, saveRows: saveTransitOshRows, setSubmitted: setTransitOshSubmitted };
+const RETURNS_STORE = { empty: emptyReturnsDay, subscribe: subscribeToReturnsDay, saveRows: saveReturnsRows, setSubmitted: setReturnsSubmitted };
+const RETURNS_WHS = [RETURNS_WH];
 const OSH_STORE = { empty: emptyOshDay, subscribe: subscribeToOshDay, saveRows: saveOshRows, setSubmitted: setOshSubmitted };
 const SEVER_STORE = { empty: emptySeverDay, subscribe: subscribeToSeverDay, saveRows: saveSeverRows, setSubmitted: setSeverSubmitted };
 
@@ -847,6 +886,7 @@ export default function ShipmentApp() {
   };
   const bk = useRegionDay({ date: bkDate, store: BK_STORE, warehouses: REGION_WHS, label: "Базар-Коргон", scope: "РЦ Базар-Коргон", unlocks, saveTimers, showToast });
   const osh = useRegionDay({ date: oshDate, store: OSH_STORE, warehouses: OSH_WHS, label: "Ош", scope: "РЦ Ош", unlocks, saveTimers, showToast });
+  const ret = useRegionDay({ date, store: RETURNS_STORE, warehouses: RETURNS_WHS, label: "Возвраты", scope: "Возвраты", unlocks, check: returnsSubmitCheck, saveTimers, showToast });
   const trBk = useRegionDay({ date, store: TR_BK_STORE, warehouses: TR_BK_WHS, label: "Транзиты → Базар-Коргон", scope: "Транзиты → Базар-Коргон", unlocks, saveTimers, showToast });
   const trOsh = useRegionDay({ date, store: TR_OSH_STORE, warehouses: TR_OSH_WHS, label: "Транзиты → Ош", scope: "Транзиты → Ош", unlocks, saveTimers, showToast });
   const [trTo, setTrTo] = useState("bk");
@@ -1324,7 +1364,9 @@ export default function ShipmentApp() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6">
-        {activeTab === "zhashylcha" ? (
+        {activeTab === "returns" ? (
+          <ReturnsPanel date={date} dateLabel={fmtDateRu(date)} ret={ret} />
+        ) : activeTab === "zhashylcha" ? (
           <ZhashylchaPanel date={date} />
         ) : activeTab === "transit" ? (
           <div className="space-y-5">
@@ -1517,6 +1559,7 @@ export default function ShipmentApp() {
               { key: "osh", title: "РЦ Ош", Icon: MapPin, accent: "emerald", day: osh.day, warehouses: OSH_WHS },
               { key: "trbk", title: "Транзиты → Базар-Коргон", Icon: Send, accent: "teal", day: trBk.day, warehouses: TR_BK_WHS },
               { key: "trosh", title: "Транзиты → Ош", Icon: Send, accent: "teal", day: trOsh.day, warehouses: TR_OSH_WHS },
+              { key: "returns", title: "Возвраты", Icon: RotateCcw, accent: "rose", day: ret.day, warehouses: RETURNS_WHS },
               { key: "sever", title: "Регионы", Icon: Compass, accent: "indigo", day: sever.day, warehouses: SEVER_STATUS_WHS },
             ]}
             yugDateLabel={fmtDateRu(yDate)}
@@ -1531,6 +1574,193 @@ export default function ShipmentApp() {
       )}
     </div>
     </UnlockCtx.Provider>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Возвраты: форма «отправитель → получатель, паллеты / роллы / коробки»
+// ---------------------------------------------------------------------------
+function ReturnsPanel({ date, dateLabel, ret }) {
+  const a = ACCENT.rose;
+  const rows = ret.day.rows_returns || [];
+  const submittedProp = Boolean(ret.day.submitted_returns);
+  const { blocked, reopened, request: requestUnlock } = useSheetBlocked("Возвраты", date, "returns", submittedProp);
+  const submitted = submittedProp || blocked;
+  const [view, setView] = useState("form");
+  const consolidated = useMemo(() => consolidateReturns(ret.day), [ret.day]);
+  const okBorder = "border-stone-300 focus:ring-2 focus:ring-stone-400";
+  const errBorder = "border-rose-400 bg-rose-50 focus:ring-2 focus:ring-rose-300";
+  const qtyInput = (r, field, issues) => (
+    <input
+      type="text" inputMode="numeric" disabled={submitted} value={r[field] ?? ""}
+      onChange={(e) => ret.update("returns", r.id, field, e.target.value)}
+      placeholder="0"
+      className={`w-full font-mono text-sm rounded-md border px-2 py-1.5 outline-none disabled:bg-stone-50 disabled:text-stone-400 ${issues.missingQty ? errBorder : okBorder}`}
+    />
+  );
+  const totalPallets = consolidated.reduce((s, r) => s + r.total, 0);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center gap-2 flex-wrap">
+        {[{ id: "form", name: "Заявки" }, { id: "otl", name: "Для ОТЛ (Возвраты)" }].map((t) => (
+          <button key={t.id} onClick={() => setView(t.id)}
+            className={`px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${view === t.id ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"}`}>
+            {t.name}
+          </button>
+        ))}
+      </div>
+
+      {view === "otl" ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-sm text-stone-600">Возвраты на {dateLabel}: {consolidated.length} заказов, {Math.round(totalPallets * 100) / 100} паллет. {submittedProp ? "" : "Данные ещё не отправлены."}</div>
+            <button
+              disabled={consolidated.length === 0}
+              onClick={() => downloadReturnsWorkbook(date, consolidated, RETURNS_STORES)}
+              className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 disabled:bg-stone-300 text-white text-sm font-semibold rounded-lg px-4 py-2.5"
+            >
+              <Download size={15} /> Скачать Excel (Возвраты)
+            </button>
+          </div>
+          <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm min-w-[720px]">
+              <thead className="bg-stone-50 text-xs uppercase tracking-wide text-stone-500">
+                <tr>
+                  <th className="text-left font-semibold px-4 py-3">Заказ №</th>
+                  <th className="text-left font-semibold px-4 py-3">Отправитель (точка отгрузки)</th>
+                  <th className="text-left font-semibold px-4 py-3">Получатель (точка доставки)</th>
+                  <th className="text-right font-semibold px-4 py-3">Паллеты</th>
+                  <th className="text-right font-semibold px-4 py-3">Роллы</th>
+                  <th className="text-right font-semibold px-4 py-3">Коробки</th>
+                  <th className="text-right font-semibold px-4 py-3">Итого, паллет</th>
+                  <th className="text-right font-semibold px-4 py-3">Вес, кг</th>
+                </tr>
+              </thead>
+              <tbody>
+                {consolidated.length === 0 && (
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-stone-400">Нет отправленных возвратов на {dateLabel}</td></tr>
+                )}
+                {consolidated.map((r) => (
+                  <tr key={r.id} className="border-t border-stone-100">
+                    <td className="px-4 py-2 font-mono text-xs">{r.order}</td>
+                    <td className="px-4 py-2">{r.sender}</td>
+                    <td className="px-4 py-2">{r.receiver}</td>
+                    <td className="px-4 py-2 text-right font-mono">{r.pallets}</td>
+                    <td className="px-4 py-2 text-right font-mono">{r.rolls}</td>
+                    <td className="px-4 py-2 text-right font-mono">{r.boxes}</td>
+                    <td className="px-4 py-2 text-right font-mono font-semibold">{r.total}</td>
+                    <td className="px-4 py-2 text-right font-mono">{r.weight}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className={`inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide ${a.text} mb-1`}>
+                <span className={`h-2 w-2 rounded-full ${a.dot}`} /> Возвраты
+              </div>
+              <p className="text-sm text-stone-500">
+                Возвраты на {dateLabel}: выберите отправителя и получателя, укажите паллеты, роллы и коробки. Номер заказа присваивается автоматически. Подача — накануне до {SUBMIT_DEADLINE_LABEL}.
+                Отправка в транспортный отдел — только кнопкой внизу.
+              </p>
+            </div>
+            {!submitted && (
+              <button onClick={() => ret.copyPrev("returns")} className="flex items-center gap-1.5 shrink-0 text-xs font-semibold text-stone-700 bg-white border border-stone-300 hover:border-stone-500 rounded-lg px-3 py-2">
+                <CopyPlus size={14} /> Перенести заказы с прошлого дня
+              </button>
+            )}
+          </div>
+
+          {blocked && (
+            <div className="flex items-center gap-2 bg-rose-50 border border-rose-300 text-rose-800 rounded-lg px-4 py-3 text-sm font-semibold">
+              <Lock size={15} /> Заблокировано (данные не поданы вовремя). Подача на {dateLabel} закрывалась накануне в {SUBMIT_DEADLINE_LABEL}.
+              <button onClick={requestUnlock} className="ml-auto text-xs font-semibold underline underline-offset-2 whitespace-nowrap">Разрешить подачу (ОТЛ)</button>
+            </div>
+          )}
+          {reopened && (
+            <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-3 text-sm">
+              <Lock size={15} /> Подача на {dateLabel} открыта ОТЛ по запросу — отправьте данные в транспортный отдел.
+            </div>
+          )}
+          {submittedProp && (
+            <div className="flex items-center justify-between gap-3 bg-stone-100 border border-stone-300 rounded-lg px-4 py-3">
+              <div className="flex items-center gap-2 text-sm text-stone-700">
+                <Lock size={15} className="text-stone-500" /> Данные за {dateLabel} отправлены в транспортный отдел. Редактирование заблокировано.
+              </div>
+              <button onClick={() => ret.unlock("returns")} className="text-xs font-semibold text-stone-600 underline underline-offset-2 hover:text-stone-900">Вернуть на редактирование</button>
+            </div>
+          )}
+
+          <div className="bg-white border border-stone-200 rounded-xl overflow-hidden overflow-x-auto">
+            <table className="w-full text-sm min-w-[900px]">
+              <thead className="bg-stone-50 text-xs uppercase tracking-wide text-stone-500">
+                <tr>
+                  <th className="text-left font-semibold px-3 py-3 w-8">#</th>
+                  <th className="text-left font-semibold px-3 py-3 w-40">Заказ №</th>
+                  <th className="text-left font-semibold px-3 py-3">Отправитель</th>
+                  <th className="text-left font-semibold px-3 py-3">Получатель</th>
+                  <th className="text-left font-semibold px-3 py-3 w-24">Паллеты</th>
+                  <th className="text-left font-semibold px-3 py-3 w-24">Роллы</th>
+                  <th className="text-left font-semibold px-3 py-3 w-24">Коробки</th>
+                  <th className="w-10" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => {
+                  const issues = returnsIssues(r);
+                  return (
+                    <tr key={r.id} className="border-t border-stone-100 align-top">
+                      <td className="px-3 py-2 text-xs text-stone-400 font-mono">{i + 1}</td>
+                      <td className="px-3 py-2">
+                        <input type="text" disabled value={r.order || ""} placeholder="авто" className="w-full font-mono text-xs rounded-md border border-stone-200 bg-stone-100 text-stone-500 px-2 py-1.5" />
+                      </td>
+                      <td className="px-3 py-2">
+                        <StoreSelect value={r.store} stores={RETURNS_STORES} disabled={submitted} hasError={issues.missingSender || issues.same}
+                          onChange={(v) => ret.update("returns", r.id, "store", v)} />
+                        {issues.same && <div className="text-xs text-rose-600 mt-1">Отправитель и получатель совпадают</div>}
+                      </td>
+                      <td className="px-3 py-2">
+                        <StoreSelect value={r.receiver || ""} stores={RETURNS_STORES} disabled={submitted} hasError={issues.missingReceiver || issues.same}
+                          onChange={(v) => ret.update("returns", r.id, "receiver", v)} />
+                      </td>
+                      <td className="px-3 py-2">{qtyInput(r, "pallets", issues)}</td>
+                      <td className="px-3 py-2">{qtyInput(r, "rolls", issues)}</td>
+                      <td className="px-3 py-2">
+                        {qtyInput(r, "boxes", issues)}
+                        {issues.missingQty && <div className="text-xs text-rose-600 mt-1">Укажите количество</div>}
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        {!submitted && (
+                          <button onClick={() => ret.remove("returns", r.id)} className="p-1.5 text-stone-300 hover:text-rose-600" title="Удалить строку"><Trash2 size={15} /></button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {!submitted && (
+              <button onClick={() => ret.add("returns")} className="w-full flex items-center justify-center gap-1.5 text-sm font-semibold text-stone-600 hover:text-stone-900 border-t border-stone-100 py-3">
+                <Plus size={15} /> Добавить заказ
+              </button>
+            )}
+          </div>
+
+          {!submitted && (
+            <div className="flex justify-end">
+              <button onClick={() => ret.submit("returns")} className="flex items-center gap-2 bg-rose-600 hover:bg-rose-700 text-white text-sm font-semibold rounded-lg px-5 py-3">
+                <Send size={15} /> Отправить в транспортный отдел
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -2427,12 +2657,14 @@ function ZhOrdersBlock({ title, rows, submitted, canEdit, duplicateOrders, onUpd
 }
 
 function ZhashylchaPanel({ date }) {
-  // Как у остальных складов: заказы подаются накануне на выбранную дату, лист на дату D закрывается
-  // после 23:30 дня D−1 (ОТЛ может открыть по запросу). Прошлые даты — архив, только просмотр.
+  // ввод только на сегодня: календарик наверху для ПРОСМОТРА —
+  // назад архив прошлых дней, вперёд пустая форма
   const zhDate = date;
-  const { blocked: zhBlocked, reopened: zhReopened, request: zhRequestUnlock } = useSheetBlocked("Жашылча", zhDate, "zh", false);
-  const lateNow = false;
-  const isToday = !zhBlocked; // правка списка машин и ввод доступны, пока лист не закрыт
+  const today = todayISO();
+  const isToday = zhDate === today;
+  const isFuture = zhDate > today;
+  // приём заказов на сегодняшний список — до 11:00 (после — предупреждаем, но не блокируем)
+  const lateNow = isToday && new Date().getHours() >= ZH_CUTOFF_HOUR;
 
   const [zhDay, setZhDay] = useState(emptyZhDay());
   const [zhLoading, setZhLoading] = useState(true);
@@ -2450,13 +2682,19 @@ function ZhashylchaPanel({ date }) {
   };
 
   useEffect(() => {
+    // будущая дата — заказы день в день, туда ещё рано, базу не трогаем вообще
+    if (zhDate > todayISO()) {
+      setZhDay(emptyZhDay());
+      setZhLoading(false);
+      return;
+    }
     setZhLoading(true);
     const unsub = subscribeToZhashylchaDay(
       zhDate,
       (data) => {
         // самовосстановление списка машин — только для сегодняшнего дня;
         // для архивных дат ничего не досоздаём, это просто просмотр истории
-        if (zhDate >= todayISO() && (!data.vehicles || data.vehicles.length === 0)) {
+        if (zhDate === todayISO() && (!data.vehicles || data.vehicles.length === 0)) {
           const seeded = seedZhashylchaVehicles();
           setZhDay({ ...data, vehicles: seeded });
           saveZhashylchaVehicles(zhDate, seeded).catch(() => {});
@@ -2642,6 +2880,20 @@ function ZhashylchaPanel({ date }) {
     );
   }
 
+  if (isFuture) {
+    return (
+      <div className="space-y-4">
+        <div className="bg-cyan-50 border border-cyan-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-cyan-800">
+          <Moon size={14} />
+          Отдельный контур: заказы подаются день в день, дата ввода всегда «сегодня» ({fmtDateRu(today)}).
+        </div>
+        <div className="bg-white border border-stone-200 rounded-xl px-6 py-16 text-center text-sm text-stone-400">
+          {dateLabel} ещё не наступила — форма для {ZH_DISPLAY_NAME} откроется автоматически в этот день.
+        </div>
+      </div>
+    );
+  }
+
   const pill = (active) =>
     `flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-full border transition-colors ${
       active ? "bg-stone-900 text-white border-stone-900" : "bg-white text-stone-600 border-stone-300 hover:border-stone-500"
@@ -2656,19 +2908,10 @@ function ZhashylchaPanel({ date }) {
     <div className="space-y-5">
       <div className="bg-cyan-50 border border-cyan-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-cyan-800">
         <Moon size={14} />
-        {`Список на ${dateLabel}: заказы подаются накануне до ${SUBMIT_DEADLINE_LABEL}, доставка с 18:00 ${dateLabel} до 18:00 следующего дня. Дата доставки в выгрузке — ${dateLabel}. «Молоко» — выгрузка для ОТЛ, «СОФ» — только ввод, без выгрузки.`}
+        {isToday
+          ? `Список на ${dateLabel}: заказы подаются до ${ZH_CUTOFF_HOUR}:00, доставка с 18:00 ${dateLabel} до 18:00 следующего дня. Дата доставки в выгрузке — ${dateLabel}. «Молоко» — выгрузка для ОТЛ, «СОФ» — только ввод, без выгрузки.`
+          : `Архив за ${dateLabel} — только просмотр. Ввод и редактирование доступны исключительно на сегодняшний день (${fmtDateRu(today)}).`}
       </div>
-      {zhBlocked && !(submittedMilk && submittedSof) && (
-        <div className="flex items-center gap-2 bg-rose-50 border border-rose-300 text-rose-800 rounded-lg px-4 py-3 text-sm font-semibold">
-          <Lock size={15} /> Заблокировано (данные не поданы вовремя). Подача на {dateLabel} закрывалась накануне в {SUBMIT_DEADLINE_LABEL}.
-          <button onClick={zhRequestUnlock} className="ml-auto text-xs font-semibold underline underline-offset-2 whitespace-nowrap">Разрешить подачу (ОТЛ)</button>
-        </div>
-      )}
-      {zhReopened && (
-        <div className="flex items-center gap-2 bg-amber-50 border border-amber-300 text-amber-800 rounded-lg px-4 py-3 text-sm">
-          <Lock size={15} /> Подача на {dateLabel} открыта ОТЛ по запросу — отправьте данные в транспортный отдел.
-        </div>
-      )}
       {lateNow && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex items-center gap-2 text-xs text-amber-800">
           <AlertTriangle size={14} />
@@ -2696,7 +2939,7 @@ function ZhashylchaPanel({ date }) {
         <YugZhashylchaPanel
           rows={rowsMilk}
           submitted={submittedMilk}
-          readOnly={zhBlocked}
+          readOnly={!isToday}
           stores={STORES_ZHASHYLCHA}
           heading={`${ZH_DISPLAY_NAME} · Молоко`}
           description={`Заказы на ${dateLabel}: загрузите файл из 1С или добавьте строки вручную. Магазин подбирается по названию, а если не нашёлся — выберите из списка. Заказы одного магазина объединяются в один (вес и объём суммируются). Паллеты: до 500 кг и до 1 м³ — одна паллета, больше по весу или объёму — несколько. Точка отгрузки — ${ZH_SHIP_POINT}, группа — ${ZH_GROUP}.`}
@@ -2713,7 +2956,7 @@ function ZhashylchaPanel({ date }) {
           title="СОФ"
           rows={rowsSof}
           submitted={submittedSof}
-          canEdit={!zhBlocked}
+          canEdit={isToday}
           duplicateOrders={duplicateOrders}
           onUpdate={updateSof}
           onAdd={addSof}
