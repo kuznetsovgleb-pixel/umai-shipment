@@ -390,6 +390,13 @@ export const subscribeToTransitOshDay = transitOshStore.subscribe;
 export const saveTransitOshRows = transitOshStore.saveRows;
 export const setTransitOshSubmitted = transitOshStore.setSubmitted;
 
+// Возвраты (общий контур): отдельная коллекция shipments_returns
+const returnsStore = makeRegionStore("shipments_returns", ["returns"]);
+export const emptyReturnsDay = returnsStore.empty;
+export const subscribeToReturnsDay = returnsStore.subscribe;
+export const saveReturnsRows = returnsStore.saveRows;
+export const setReturnsSubmitted = returnsStore.setSubmitted;
+
 // Север: 3 склада с обычной формой + РЦ Жашылча (Молоко и СОФ) со строками из файла 1С
 export const SEVER_ZH_KEYS = ["zh_milk", "zh_sof"];
 const severStore = makeRegionStore("shipments_sever", SEVER_WAREHOUSE_IDS, SEVER_ZH_KEYS);
