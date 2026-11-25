@@ -256,3 +256,36 @@ export function downloadHolodYugWorkbook(dateIso, consolidated) {
 export function downloadSeverWorkbook(dateIso, consolidated) {
   XLSX.writeFile(buildHolodYugWorkbook(dateIso, consolidated), `TMS_import_sever_${dateIso}.xlsx`);
 }
+
+
+// ---------------------------------------------------------------------------
+// Возвраты: перемещения «магазин → магазин». Orders: точка отгрузки = отправитель, точка доставки = получатель;
+// окно доставки — стандартное (лист «Магазины», как в основной выгрузке).
+// rows: [{ order, sender, receiver, total, weight, unloadSec }]
+// ---------------------------------------------------------------------------
+export function buildReturnsWorkbook(dateIso, rows, allStores = STORES) {
+  const dateLabel = fmtDateRu(dateIso);
+  const dateSuffix = fmtDateCompact(dateIso);
+  const ordersHeader = [
+    "Номер заказа *", "Дата доставки*", "Наименование точки отгрузки*", "Наименование точки доставки*",
+    "Кол-во ГМ", "Тип ГМ", "Вес (брутто), кг",
+    "Время на разгрузку, сек (на единицу груза)", "Время на разгрузку, сек (на точку)",
+    "Товарная группа",
+  ];
+  const ordersRows = rows.map((r) => [
+    `${r.order}_${dateSuffix}`, dateLabel, r.sender, r.receiver,
+    r.total, "Паллета", r.weight,
+    r.unloadSec, POINT_UNLOAD_SEC,
+    "",
+  ]);
+  const storesHeader = ["Код магазина", "Временное окно приемки (в будни)", "Время на разгрузку, сек (на точку)"];
+  const storesRows = allStores.map((s) => [s, STORE_WINDOWS[s] || "", POINT_UNLOAD_SEC]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([ordersHeader, ...ordersRows]), "Orders");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([storesHeader, ...storesRows]), "Магазины");
+  return wb;
+}
+
+export function downloadReturnsWorkbook(dateIso, rows, allStores) {
+  XLSX.writeFile(buildReturnsWorkbook(dateIso, rows, allStores), `TMS_import_returns_${dateIso}.xlsx`);
+}
