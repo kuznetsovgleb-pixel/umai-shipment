@@ -807,3 +807,12 @@ export const ZHASHYLCHA_NIGHT_STORES = [
   "SPAR-11 Панфилова",
   "Магазин Киевская-Турусбекова",
 ];
+
+
+// ---------------------------------------------------------------------------
+// Возвраты (общий контур): перемещения «магазин → магазин». Отправитель и получатель — любые магазины/точки.
+// Подача накануне (как у складов), автономера заказов: ддммгг + 401 + №. Своя коллекция shipments_returns.
+// ---------------------------------------------------------------------------
+export const RETURNS_WH = { id: "returns", name: "Возвраты", accent: "rose", qtyMode: "returns", autoOrderCode: "401" };
+export const RETURNS_WAREHOUSE_IDS = ["returns"];
+export const RETURNS_STORES = Array.from(new Set([...STORES, ...HOLOD_YUG_STORES, ...SEVER_STORES, ...KARAKOL_STORES]));
