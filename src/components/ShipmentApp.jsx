@@ -1056,8 +1056,8 @@ export default function ShipmentApp() {
     patchKarakolRows(whId, (rows) => (rows.length > 1 ? rows.filter((r) => r.id !== rowId) : rows));
 
   const submitKarakol = async (whId) => {
-    const wh = WAREHOUSES.find((w) => w.id === whId);
-    const rowsToSend = assignAutoOrders(kDay[`rows_${whId}`] || [], KARAKOL_WHS.find((w) => w.id === whId), date);
+    const wh = KARAKOL_WHS.find((w) => w.id === whId); // с учётом режима ПТО (паллеты + коробки)
+    const rowsToSend = assignAutoOrders(kDay[`rows_${whId}`] || [], wh, date);
     const err = submitCheck(wh, rowsToSend, findDuplicateOrders(KARAKOL_WHS, { ...kDay, [`rows_${whId}`]: rowsToSend }));
     if (err) return showToast(err);
     try {
