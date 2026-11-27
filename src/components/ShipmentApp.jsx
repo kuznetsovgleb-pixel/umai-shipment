@@ -2,7 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect, useRef, createContext
 import {
   Plus, Trash2, Send, Download, Truck, CheckCircle2, Circle, AlertTriangle,
   Lock, Pencil, Check, Loader2, Wifi, Users, Moon, Mountain, Search,
-  Snowflake, Upload, ChevronLeft, ChevronRight, MapPin, Compass, CopyPlus, RotateCcw,
+  Snowflake, Upload, FileSpreadsheet, ChevronLeft, ChevronRight, MapPin, Compass, CopyPlus, RotateCcw,
 } from "lucide-react";
 import { RETURNS_WH, RETURNS_STORES, WAREHOUSES, KARAKOL_WAREHOUSES, KARAKOL_POINT, KARAKOL_STORES, STORES_NO_KARAKOL, STORES_NO_YUG, STORES_NO_SEVER, STORES_HLEBZAVOD, STORES_ZHASHYLCHA, HOLOD_YUG_STORES, YUG_WAREHOUSE_IDS, REGION_WAREHOUSE_IDS, OSH_WAREHOUSE_IDS, TRANSIT_WAREHOUSE_IDS, MAIN_AUTO_ORDER_CODES, AUTO_ORDER_CODES, BAZAR_KORGON_POINT, OSH_POINT, BAZAR_KORGON_STORES, OSH_STORES, SEVER_WAREHOUSE_IDS, SEVER_STORES, COEFFICIENT, PALLET_UNLOAD_SEC, POINT_UNLOAD_SEC } from "../data/reference";
 import { subscribeToUnlocks, setUnlockFlag, unlockKey,
@@ -17,6 +17,7 @@ import { subscribeToUnlocks, setUnlockFlag, unlockKey,
   emptySeverDay, subscribeToSeverDay, saveSeverRows, setSeverSubmitted, SEVER_ZH_KEYS,
   emptyReturnsDay, subscribeToReturnsDay, saveReturnsRows, setReturnsSubmitted,
 } from "../lib/dayStore";
+import { parseTmsRoutes, downloadWarehouseWorkbook } from "../lib/warehouseExport";
 import { downloadReturnsWorkbook, downloadWorkbook, downloadZhashylchaWorkbook, downloadKarakolWorkbook, buildKarakolTransfers, downloadHolodYugWorkbook, buildBazarKorgonTransfers, buildOshTransfers, downloadBazarKorgonWorkbook, downloadOshWorkbook, buildTransitBkTransfers, buildTransitOshTransfers, downloadTransitBkWorkbook, downloadTransitOshWorkbook, downloadSeverWorkbook } from "../lib/exportExcel";
 import {
   YUG_ZH_SHIP_POINT, YUG_ZH_GROUP, YUG_ZH_NAME, nextShipDate, stepShipDate, weekdayShort, BK_OSH_SHIP_WEEKDAYS, boxesToPallets as yugBoxesToPallets,
@@ -230,7 +231,7 @@ const findDuplicateStores = (rows, byCategory = false) => {
   return new Set(Object.keys(counts).filter((k) => counts[k] > 1));
 };
 
-const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "kcp", "sendvichi", "transit_yug", "transit_sever", "returns", "zhashylcha", "karakol", "bazar_korgon", "osh", "transit", "sever", "holod_yug", "otl"];
+const TABS = ["prigorodnoe", "argo", "pto", "sagadalieva", "sagadalieva_zamorozka", "hlebzavod", "kkcp", "kcp", "sendvichi", "transit_yug", "transit_sever", "returns", "zhashylcha", "karakol", "bazar_korgon", "osh", "transit", "sever", "holod_yug", "otl", "wh_export"];
 
 // список времени погрузки для выбора у ТС
 const LOAD_TIME_OPTIONS = Array.from({ length: 11 }, (_, i) => `${String(8 + i).padStart(2, "0")}:00`);
@@ -444,6 +445,7 @@ const SPECIAL_TABS = {
   sever: { label: "Регионы", Icon: Compass, accent: "indigo" },
   holod_yug: { label: "Холод Юг", Icon: Snowflake, accent: "sky" },
   otl: { label: "Для ОТЛ", Icon: Truck, accent: null },
+  wh_export: { label: "Выгрузка для складов", Icon: FileSpreadsheet, accent: null },
 };
 const YUG_TR_NAME = "Транзит Юг";
 const YUG_TR_SHIP_POINT = "РЦ Транзит Юг";
@@ -1320,7 +1322,7 @@ export default function ShipmentApp() {
             <div className="flex items-center gap-1.5 text-xs font-medium text-stone-400">
               <Wifi size={13} className="text-emerald-500" /> Синхронизировано
             </div>
-            {activeTab !== "holod_yug" && (
+            {activeTab !== "holod_yug" && activeTab !== "wh_export" && (
               <label className="flex items-center gap-2 bg-stone-50 border border-stone-300 rounded-lg px-3 py-2">
                 <span className="text-xs font-medium text-stone-500 uppercase tracking-wide">Дата</span>
                 <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="bg-transparent text-sm font-mono font-semibold text-stone-900 outline-none" />
@@ -1356,7 +1358,7 @@ export default function ShipmentApp() {
                 {sp ? <sp.Icon size={14} /> : <span className={`h-1.5 w-1.5 rounded-full ${sub ? a.dot : "bg-stone-300"}`} />}
                 {sp ? sp.label : tabLabel(id)}
                 {sub && <Lock size={12} className="text-stone-400" />}
-                {active && <span className={`absolute left-0 right-0 -bottom-px h-0.5 ${isOtl ? "bg-stone-800" : a.bg}`} />}
+                {active && <span className={`absolute left-0 right-0 -bottom-px h-0.5 ${isOtl || !a ? "bg-stone-800" : a.bg}`} />}
               </button>
             );
           })}
@@ -1364,7 +1366,9 @@ export default function ShipmentApp() {
       </div>
 
       <div className="max-w-6xl mx-auto px-6 py-6">
-        {activeTab === "returns" ? (
+        {activeTab === "wh_export" ? (
+          <WarehouseExportPanel />
+        ) : activeTab === "returns" ? (
           <ReturnsPanel date={date} dateLabel={fmtDateRu(date)} ret={ret} />
         ) : activeTab === "zhashylcha" ? (
           <ZhashylchaPanel date={date} />
@@ -1580,6 +1584,69 @@ export default function ShipmentApp() {
 // ---------------------------------------------------------------------------
 // Возвраты: форма «отправитель → получатель, паллеты / роллы / коробки»
 // ---------------------------------------------------------------------------
+function WarehouseExportPanel() {
+  const [state, setState] = useState({ status: "idle" });
+  const inputRef = useRef(null);
+
+  const onFile = async (file) => {
+    if (!file) return;
+    setState({ status: "loading", fileName: file.name });
+    try {
+      const res = parseTmsRoutes(await file.arrayBuffer());
+      setState({ status: "ready", fileName: file.name, ...res });
+    } catch (e) {
+      setState({ status: "error", fileName: file.name, message: e?.message || "Не удалось обработать файл" });
+    }
+  };
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div>
+        <h2 className="text-lg font-bold text-stone-900">Выгрузка для складов</h2>
+        <p className="text-sm text-stone-500 mt-1">
+          Загрузите выгрузку маршрутов из ТМС (файл routes_….xlsx). Будет сформирован файл для складов: вкладка на каждую точку погрузки — рейс, время погрузки, магазины.
+        </p>
+      </div>
+
+      <div className="bg-white border border-stone-200 rounded-xl p-5 space-y-4">
+        <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden"
+          onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ""; }} />
+        <button onClick={() => inputRef.current?.click()}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-stone-900 text-white text-sm font-semibold hover:bg-stone-700">
+          <Upload size={15} /> Загрузить файл из ТМС
+        </button>
+
+        {state.status === "loading" && (
+          <div className="flex items-center gap-2 text-sm text-stone-500"><Loader2 size={15} className="animate-spin" /> Обработка {state.fileName}…</div>
+        )}
+        {state.status === "error" && (
+          <div className="flex items-start gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" /> {state.message}
+          </div>
+        )}
+        {state.status === "ready" && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm text-emerald-700">
+              <CheckCircle2 size={15} /> Файл обработан: {state.fileName}
+            </div>
+            <ul className="text-sm text-stone-600 divide-y divide-stone-100 border border-stone-200 rounded-lg">
+              {state.points.map((p) => (
+                <li key={p.name} className="flex justify-between px-3 py-1.5">
+                  <span>{p.name}</span><span className="text-stone-400">{p.rows.length} рейс.</span>
+                </li>
+              ))}
+            </ul>
+            <button onClick={() => downloadWarehouseWorkbook(state.points, state.dateIso)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-red-700 text-white text-sm font-semibold hover:bg-red-800">
+              <Download size={15} /> Скачать файл для складов
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ReturnsPanel({ date, dateLabel, ret }) {
   const a = ACCENT.rose;
   const rows = ret.day.rows_returns || [];
